@@ -216,6 +216,8 @@ def store(db: Session, src: Source, result: CollectResult, started) -> dict:
     if result.complete and seen_device_ids:
         q = db.query(Finding).filter(Finding.device_id.in_(seen_device_ids), Finding.status == "open",
                                      Finding.last_seen < started)
+        if result.keep_cves:
+            q = q.filter(Finding.cve_id.notin_(result.keep_cves))
         for row in q.all():
             row.status, row.resolved_at = "resolved", utcnow()
             stats["resolved"] += 1

@@ -55,11 +55,16 @@ def handler(request: httpx.Request) -> httpx.Response:
         if path.endswith("/vulnerabilities/org1"):
             assert u.params.get("remediation_status") == "All_except_control_applied"
             items = [{"cve_id": "CVE-2024-1111", "cvss_score": 9.8, "base_severity": "Critical",
+                      "remediation_status": "Overdue"},
+                     {"cve_id": "CVE-2015-0319", "cvss_score": 9.8, "base_severity": "Critical",
                       "remediation_status": "Overdue"}]
             if not STATE["second"]:
                 items.append({"cve_id": "CVE-2024-2222", "cvss_score": 5.3, "base_severity": "Medium",
                               "remediation_status": "Due later"})
             return httpx.Response(200, json={"items": items, "total_items": len(items)})
+        if path.endswith("/CVE-2015-0319/endpoints"):
+            STATE["calls_500"] = STATE.get("calls_500", 0) + 1
+            return httpx.Response(500, json={"error": "internal"})
         if path.endswith("/CVE-2024-1111/endpoints"):
             return httpx.Response(200, json={"items": [{"endpoint_id": "ep1", "endpoint_name": "PC-BUERO-01",
                 "software": [{"product_name": "7-Zip", "versions": [{"version": "23.01"}],
@@ -108,6 +113,8 @@ def handler(request: httpx.Request) -> httpx.Response:
 transport = httpx.MockTransport(handler)
 
 from app.collectors import action1, linux, nas  # noqa: E402
+
+action1.time.sleep = lambda s: None  # Wartezeiten im Test überspringen
 from app.enrich import feeds  # noqa: E402
 
 action1._transport = transport
@@ -208,6 +215,9 @@ def main():
         db = SessionLocal()
         for s in db.query(Source).all():
             assert s.last_status == "ok", (s.name, s.last_message)
+        a1 = db.query(Source).filter_by(kind="action1").one()
+        assert "CVE-2015-0319" in a1.last_message and "Serverfehler" in a1.last_message, a1.last_message
+        assert STATE["calls_500"] == 6, STATE  # je 3 Versuche mit Seitengröße 200 und 50
         names = sorted(d.name for d in db.query(Device).all())
         assert names == ["PC-BUERO-01", "PC-WERKSTATT", "nas-frisch", "pve-eichen"], names
         assert db.query(Tenant).filter_by(action1_org_id="org1").count() == 1

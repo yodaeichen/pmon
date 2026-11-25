@@ -9,6 +9,7 @@ Pfade wie im offiziellen PowerShell-Modul PSAction1:
   GET  /apps/{org}/data/{endpoint}
 Antworten sind seitenweise ({items, total_items, next_page}, Parameter from/limit).
 """
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -80,22 +81,28 @@ class Action1Client:
         if not self.token:
             self.login()
         url = path if path.startswith("http") else f"{self.base}{path}"
-        for attempt in range(2):
+        relogged = False
+        for attempt in range(3):
             r = self.http.get(url, params=params, headers={"Authorization": f"Bearer {self.token}"})
-            if r.status_code == 401 and attempt == 0:
+            if r.status_code == 401 and not relogged:
+                relogged = True
                 self.login()
                 continue
             if r.status_code == 404:
                 return None
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:
+                time.sleep(2 if attempt == 0 else 5)  # kurzzeitige Störung abwarten
+                continue
             r.raise_for_status()
             return r.json()
+        r.raise_for_status()
         return None
 
-    def paged(self, path: str, params: dict | None = None, max_items: int = 50_000):
+    def paged(self, path: str, params: dict | None = None, max_items: int = 50_000, page_size: int = PAGE):
         params = dict(params or {})
         offset = 0
         seen = 0
-        page = self.get(path, {**params, "limit": PAGE})
+        page = self.get(path, {**params, "limit": page_size})
         while page:
             items = page.get("items") if isinstance(page, dict) else page
             if not items:
@@ -111,7 +118,7 @@ class Action1Client:
                 offset += len(items)
                 if offset >= int(total):
                     return
-                page = self.get(path, {**params, "from": offset, "limit": PAGE})
+                page = self.get(path, {**params, "from": offset, "limit": page_size})
             elif nxt:
                 page = self.get(nxt)
             else:
@@ -138,6 +145,7 @@ def collect(config: dict, secrets: dict, timeout: float = 30,
             org_id = str(org.get("id"))
             org_name = _first(org, "name", "Name", default=org_id)
             devices: dict[str, DeviceData] = {}
+            skipped: list[str] = []
             for ep in cli.paged(f"/endpoints/managed/{org_id}"):
                 ep_id = str(_first(ep, "id", "endpoint_id"))
                 if not ep_id:
@@ -175,7 +183,11 @@ def collect(config: dict, secrets: dict, timeout: float = 30,
                 except (TypeError, ValueError):
                     cvss = None
                 status = str(_first(vul, "remediation_status"))
-                for aff in cli.paged(f"/vulnerabilities/{org_id}/{cve}/endpoints"):
+                affected = _affected(cli, org_id, cve)
+                if affected is None:
+                    skipped.append(cve)
+                    continue
+                for aff in affected:
                     ep_id = str(_first(aff, "endpoint_id", "id"))
                     dev = devices.get(ep_id)
                     if dev is None:
@@ -218,6 +230,12 @@ def collect(config: dict, secrets: dict, timeout: float = 30,
                         res.messages.append(f"Software-Inventar für {dev.name} nicht abrufbar: {exc}")
             res.devices.extend(devices.values())
             res.messages.append(f"{org_name}: {len(devices)} Geräte")
+            if skipped:
+                # Funde dieser CVEs nicht als „behoben" werten, alle anderen normal abgleichen
+                res.keep_cves.update(skipped)
+                liste = ", ".join(skipped[:5]) + (f" und {len(skipped) - 5} weitere" if len(skipped) > 5 else "")
+                res.messages.append(f"Hinweis: Action1 lieferte für {len(skipped)} CVE(s) einen Serverfehler, "
+                                    f"übersprungen: {liste}")
     except httpx.HTTPStatusError as exc:
         raise CollectorError(f"Action1-API antwortet mit {exc.response.status_code}: {exc.request.url.path}") from exc
     except httpx.HTTPError as exc:
@@ -225,6 +243,18 @@ def collect(config: dict, secrets: dict, timeout: float = 30,
     finally:
         cli.close()
     return res
+
+
+def _affected(cli: Action1Client, org_id: str, cve: str) -> list | None:
+    """Betroffene Endpoints einer CVE; None, wenn Action1 dauerhaft einen Fehler liefert."""
+    path = f"/vulnerabilities/{org_id}/{cve}/endpoints"
+    for size in (PAGE, 50):
+        try:
+            return list(cli.paged(path, page_size=size))
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code < 500:
+                raise
+    return None
 
 
 def test_connection(config: dict, secrets: dict, timeout: float = 15) -> str:

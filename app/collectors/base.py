@@ -50,6 +50,8 @@ class CollectResult:
     messages: list[str] = field(default_factory=list)
     # Bei Teilergebnissen keine Funde als „behoben" markieren
     complete: bool = True
+    # CVEs, die nicht abgefragt werden konnten – deren Funde bleiben unverändert offen
+    keep_cves: set[str] = field(default_factory=set)
 
 
 class CollectorError(Exception):
