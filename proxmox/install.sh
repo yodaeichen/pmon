@@ -30,6 +30,8 @@ IP="${IP:-dhcp}"
 GW="${GW:-}"
 DNS="${DNS:-}"
 ONBOOT="${ONBOOT:-1}"
+CT_LOCALE="${CT_LOCALE:-de_DE.UTF-8}"
+TIMEZONE="${TIMEZONE:-Europe/Berlin}"
 STORAGE="${STORAGE:-}"
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-}"
 NPM_SETUP="${NPM_SETUP:-}"          # yes | no (leer = je nach Modus)
@@ -195,6 +197,14 @@ advanced_settings() {
     if [ -z "$v" ] || valid_ip "$v"; then DNS="$v"; break; fi
     wt --title "Ungültig" --msgbox "Bitte eine IPv4-Adresse oder leer." 8 50 || true
   done
+  CT_LOCALE="$(wt --title "Sprache" --radiolist "Systemsprache im Container:" 12 68 2 \
+    "de_DE.UTF-8" "Deutsch (empfohlen)" "$([ "$CT_LOCALE" = de_DE.UTF-8 ] && echo ON || echo OFF)" \
+    "en_US.UTF-8" "Englisch" "$([ "$CT_LOCALE" = en_US.UTF-8 ] && echo ON || echo OFF)")" || cancelled
+  while true; do
+    v="$(input "Zeitzone" "Zeitzone des Containers:" "$TIMEZONE")"
+    [ -f "/usr/share/zoneinfo/$v" ] && { TIMEZONE="$v"; break; }
+    wt --title "Unbekannt" --msgbox "Zeitzone „$v“ gibt es nicht (Beispiel: Europe/Berlin)." 8 60 || true
+  done
   if yesno "Autostart" "Container beim Start des Proxmox-Hosts automatisch starten?"; then ONBOOT=1; else ONBOOT=0; fi
   # Anwendung
   DOMAIN="$(input "Domain" "Unter welcher Adresse wird pmon erreichbar sein?" "$DOMAIN")"
@@ -224,6 +234,7 @@ Ressourcen:     ${CORES} Kerne, ${RAM} MB RAM, ${SWAP} MB Swap, ${DISK} GB
 Speicher:       ${STORAGE} (Vorlage: ${TEMPLATE_STORAGE})
 Netzwerk:       ${BRIDGE}${VLAN:+, VLAN ${VLAN}}, IP ${IP}${GW:+, GW ${GW}}${DNS:+, DNS ${DNS}}
 Autostart:      $([ "$ONBOOT" = 1 ] && echo ja || echo nein)
+Sprache/Zeit:   ${CT_LOCALE}, ${TIMEZONE}
 Adresse:        https://${DOMAIN} → Port ${PORT}
 NPM einrichten: $([ "$NPM_SETUP" = yes ] && echo "ja (${NPM_URL})" || echo nein)
 Quelle:         github.com/${REPO} (${BRANCH})
@@ -260,6 +271,13 @@ else
 fi
 if pct status "$CTID" >/dev/null 2>&1; then die "Container $CTID existiert bereits."; fi
 [ "$IP" = "dhcp" ] && msg_warn "IP per DHCP – für den Reverse Proxy besser eine DHCP-Reservierung einrichten."
+
+# Befehle im Container während der Installation: C.UTF-8 ist immer vorhanden.
+# Die eingestellte Sprache (z. B. de_DE.UTF-8) erzeugt setup.sh erst und setzt sie als Standard.
+ct_exec() {
+  pct exec "$CTID" -- env LANG=C.UTF-8 LC_ALL=C.UTF-8 LANGUAGE= \
+    DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none "$@" </dev/null
+}
 
 # ------------------------------------------------------------- Vorlage
 msg_info "Suche Debian-${DEBIAN_VERSION}-Vorlage"
@@ -298,24 +316,25 @@ msg_ok "Container gestartet"
 
 msg_info "Warte auf Netzwerk"
 for i in $(seq 1 40); do
-  if pct exec "$CTID" -- getent hosts github.com >/dev/null 2>&1 </dev/null; then break; fi
+  if ct_exec getent hosts github.com >/dev/null 2>&1; then break; fi
   [ "$i" -eq 40 ] && die "Container ${CTID} hat kein Netzwerk/DNS – Bridge, VLAN und Gateway prüfen."
   sleep 2
 done
 msg_ok "Netzwerk bereit"
 
 msg_info "Installiere Grundpakete"
-pct exec "$CTID" -- bash -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null" </dev/null
+ct_exec bash -c "apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null"
 msg_ok "Grundpakete installiert"
 
 msg_info "Installiere ${APP} (dauert ein paar Minuten)"
-pct exec "$CTID" -- env REPO="$REPO" BRANCH="$BRANCH" DOMAIN="$DOMAIN" PORT="$PORT" \
-  bash -c "curl -fsSL '${RAW}/scripts/setup.sh' -o /root/pmon-setup.sh && bash /root/pmon-setup.sh" </dev/null \
+ct_exec env REPO="$REPO" BRANCH="$BRANCH" DOMAIN="$DOMAIN" PORT="$PORT" \
+  SET_SYSTEM_LOCALE=1 CT_LOCALE="$CT_LOCALE" TIMEZONE="$TIMEZONE" \
+  bash -c "curl -fsSL '${RAW}/scripts/setup.sh' -o /root/pmon-setup.sh && bash /root/pmon-setup.sh" \
   || die "Installation im Container fehlgeschlagen – Ausgabe oben prüfen."
 msg_ok "${APP} installiert"
 
-CT_IP="$(pct exec "$CTID" -- hostname -I </dev/null | awk '{print $1}')"
-ACCESS="$(pct exec "$CTID" -- cat /root/pmon-zugang.txt </dev/null 2>/dev/null || true)"
+CT_IP="$(ct_exec hostname -I | awk '{print $1}')"
+ACCESS="$(ct_exec cat /root/pmon-zugang.txt 2>/dev/null || true)"
 
 # ------------------------------------------------------------- NPM
 if [ "$NPM_SETUP" = "yes" ]; then

@@ -3,6 +3,9 @@
 # Läuft im LXC (vom Proxmox-Einzeiler aufgerufen) oder direkt auf einer VM.
 # Mehrfach ausführbar: aktualisiert Code und Abhängigkeiten, Daten bleiben erhalten.
 set -euo pipefail
+# Einheitliche Sprache, damit apt/perl nicht über fehlende Locales klagen
+export LANG=C.UTF-8 LC_ALL=C.UTF-8 LANGUAGE=
+export DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none
 
 REPO="${REPO:-yodaeichen/pmon}"
 BRANCH="${BRANCH:-main}"
@@ -12,6 +15,10 @@ DATA_DIR="${DATA_DIR:-/var/lib/pmon}"
 ENV_FILE="${ENV_FILE:-/etc/pmon.env}"
 DOMAIN="${DOMAIN:-pmon.mbit.solutions}"
 PORT="${PORT:-8000}"
+# Nur im eigenen Container (vom Proxmox-Installer gesetzt): Systemsprache und Zeitzone einstellen
+SET_SYSTEM_LOCALE="${SET_SYSTEM_LOCALE:-0}"
+CT_LOCALE="${CT_LOCALE:-de_DE.UTF-8}"
+TIMEZONE="${TIMEZONE:-Europe/Berlin}"
 SVC_USER="pmon"
 ACCESS_FILE="/root/pmon-zugang.txt"
 
@@ -24,7 +31,24 @@ command -v apt-get >/dev/null || die "Nur Debian/Ubuntu werden unterstützt."
 say "Pakete installieren"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv git ca-certificates curl >/dev/null
+apt-get install -y -qq python3 python3-venv git ca-certificates curl locales tzdata >/dev/null
+
+if [ "$SET_SYSTEM_LOCALE" = "1" ]; then
+  say "Sprache ${CT_LOCALE} und Zeitzone ${TIMEZONE} einstellen"
+  if ! grep -qE "^${CT_LOCALE}( |$)" /etc/locale.gen 2>/dev/null; then
+    if grep -qE "^# *${CT_LOCALE}( |$)" /etc/locale.gen 2>/dev/null; then
+      sed -i -E "s/^# *(${CT_LOCALE})( |$)/\\1\\2/" /etc/locale.gen
+    else
+      echo "${CT_LOCALE} UTF-8" >> /etc/locale.gen
+    fi
+  fi
+  locale-gen >/dev/null
+  update-locale LANG="${CT_LOCALE}" LANGUAGE="${CT_LOCALE%%.*}:${CT_LOCALE%%_*}"
+  if [ -f "/usr/share/zoneinfo/${TIMEZONE}" ]; then
+    ln -sf "/usr/share/zoneinfo/${TIMEZONE}" /etc/localtime
+    echo "${TIMEZONE}" > /etc/timezone
+  fi
+fi
 
 if ! id "$SVC_USER" >/dev/null 2>&1; then
   say "Dienstbenutzer $SVC_USER anlegen"
@@ -63,7 +87,7 @@ PORT=${PORT}
 TRUSTED_PROXIES=*
 REPO=${REPO}
 BRANCH=${BRANCH}
-DISPLAY_TZ=Europe/Berlin
+DISPLAY_TZ=${TIMEZONE}
 EOF
   chown root:"$SVC_USER" "$ENV_FILE"
   chmod 640 "$ENV_FILE"
