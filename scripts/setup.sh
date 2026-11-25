@@ -135,6 +135,8 @@ export REPO BRANCH
 exec bash ${APP_DIR}/scripts/setup.sh "\$@"
 EOF
 chmod 755 /usr/local/bin/pmon-update
+# „pct exec <CTID> -- pmon-update" nutzt einen Suchpfad ohne /usr/local/bin
+ln -sf /usr/local/bin/pmon-update /usr/bin/pmon-update
 
 if ! command -v systemctl >/dev/null || [ ! -d /run/systemd/system ]; then
   die "Kein systemd gefunden: Programm installiert, aber kein Dienst eingerichtet."

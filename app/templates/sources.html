@@ -18,12 +18,19 @@
         <div class="sub">{{ s.tenant.name if s.tenant else ("Kunden automatisch" if s.kind == "action1" else "–") }} · alle {{ s.interval_minutes }} Min.</div></td>
       <td>{{ kinds[s.kind].label }}</td>
       <td>{{ dev_count.get(s.id, 0) }}</td>
-      <td class="nowrap">{% if s.id in running %}<span class="badge b-blue">{{ icon("refresh-cw") }} läuft …</span>
-        {% elif s.last_status == "ok" %}<span class="badge b-ok">ok</span>{% elif s.last_status == "fehler" %}<span class="badge p-sofort">Fehler</span>{% endif %}
+      <td class="nowrap">{% if s.id in cancelling %}<span class="badge p-hoch">wird abgebrochen …</span>
+        {% elif s.id in running %}<span class="badge b-blue">{{ icon("refresh-cw") }} läuft …</span>
+        {% elif s.last_status == "ok" %}<span class="badge b-ok">ok</span>{% elif s.last_status == "fehler" %}<span class="badge p-sofort">Fehler</span>
+        {% elif s.last_status == "abgebrochen" %}<span class="badge p-hoch">abgebrochen</span>{% endif %}
         <div class="sub">{{ ago(s.last_run) }}</div></td>
       <td class="hide-sm small">{{ (s.last_message or "")[:180] }}</td>
-      <td class="right"><form method="post" action="/quellen/{{ s.id }}/scan" class="inline">{{ csrf_field() }}
-        <button class="btn btn-outline btn-sm" {{ 'disabled' if s.id in running }}>{{ icon("refresh-cw") }} Scannen</button></form></td>
+      <td class="right">{% if s.id in running %}
+        <form method="post" action="/quellen/{{ s.id }}/abbrechen" class="inline" data-confirm="Scan von „{{ s.name }}“ abbrechen?">{{ csrf_field() }}
+          <button class="btn btn-danger btn-sm" {{ 'disabled' if s.id in cancelling }}>Abbrechen</button></form>
+        {% else %}
+        <form method="post" action="/quellen/{{ s.id }}/scan" class="inline">{{ csrf_field() }}
+          <button class="btn btn-outline btn-sm">{{ icon("refresh-cw") }} Scannen</button></form>
+        {% endif %}</td>
     </tr>
   {% else %}
     <tr><td colspan="6" class="empty">Noch keine Quelle. Am besten mit <a href="/quellen/neu?typ=action1">Action1</a> beginnen.</td></tr>

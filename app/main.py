@@ -92,6 +92,9 @@ async def lifespan(app: FastAPI):
     from .bootstrap import ensure_admin
 
     ensure_admin()
+    from .scanner import cleanup_stale
+
+    cleanup_stale()
     task = asyncio.create_task(scheduler()) if settings.scheduler_enabled else None
     yield
     if task:

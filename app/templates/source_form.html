@@ -18,12 +18,17 @@
   {% if src %}
   <div class="btns">
     <form method="post" action="/quellen/{{ src.id }}/test" class="inline">{{ csrf_field() }}<button class="btn btn-outline">{{ icon("plug") }} Verbindung testen</button></form>
+    {% if running %}
+    <form method="post" action="/quellen/{{ src.id }}/abbrechen" class="inline" data-confirm="Laufenden Scan abbrechen?">{{ csrf_field() }}<button class="btn btn-danger" {{ 'disabled' if cancelling }}>Scan abbrechen</button></form>
+    {% else %}
     <form method="post" action="/quellen/{{ src.id }}/scan" class="inline">{{ csrf_field() }}<button class="btn btn-primary">{{ icon("refresh-cw") }} Jetzt scannen</button></form>
+    {% endif %}
   </div>
   {% endif %}
 </div>
 {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
-{% if src and src.last_status %}<div class="flash {{ 'ok' if src.last_status == 'ok' else 'err' }}">Letzter Lauf {{ fmt_dt(src.last_run) }}: {{ src.last_message }}</div>{% endif %}
+{% if running %}<div class="flash ok" data-running>{{ icon("refresh-cw") }} {{ "Scan wird abgebrochen …" if cancelling else "Scan läuft … die Seite aktualisiert sich automatisch." }}</div>
+{% elif src and src.last_status %}<div class="flash {{ 'ok' if src.last_status == 'ok' else 'err' }}">Letzter Lauf {{ fmt_dt(src.last_run) }}: {{ src.last_message }}</div>{% endif %}
 
 <form method="post" action="/quellen/speichern" class="card">
   {{ csrf_field() }}<input type="hidden" name="kind" value="{{ kind }}">{% if src %}<input type="hidden" name="sid" value="{{ src.id }}">{% endif %}

@@ -9,12 +9,11 @@ Pfade wie im offiziellen PowerShell-Modul PSAction1:
   GET  /apps/{org}/data/{endpoint}
 Antworten sind seitenweise ({items, total_items, next_page}, Parameter from/limit).
 """
-import time
 from datetime import datetime, timezone
 
 import httpx
 
-from .base import CollectorError, CollectResult, DeviceData, FindingData
+from .base import CollectorError, CollectResult, DeviceData, FindingData, no_stop, wait
 
 REGIONS = {
     "eu": ("Europa", "https://app.eu.action1.com/api/3.0"),
@@ -55,7 +54,8 @@ def _parse_dt(value) -> datetime | None:
 
 class Action1Client:
     def __init__(self, base_url: str, client_id: str, client_secret: str,
-                 timeout: float = 30, transport: httpx.BaseTransport | None = None):
+                 timeout: float = 30, transport: httpx.BaseTransport | None = None, should_stop=no_stop):
+        self.should_stop = should_stop
         self.base = base_url.rstrip("/")
         self.client_id = client_id
         self.client_secret = client_secret
@@ -83,6 +83,7 @@ class Action1Client:
         url = path if path.startswith("http") else f"{self.base}{path}"
         relogged = False
         for attempt in range(3):
+            self.should_stop()
             r = self.http.get(url, params=params, headers={"Authorization": f"Bearer {self.token}"})
             if r.status_code == 401 and not relogged:
                 relogged = True
@@ -91,7 +92,7 @@ class Action1Client:
             if r.status_code == 404:
                 return None
             if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-                time.sleep(2 if attempt == 0 else 5)  # kurzzeitige Störung abwarten
+                wait(2 if attempt == 0 else 5, self.should_stop)  # kurzzeitige Störung abwarten
                 continue
             r.raise_for_status()
             return r.json()
@@ -126,12 +127,12 @@ class Action1Client:
 
 
 def collect(config: dict, secrets: dict, timeout: float = 30,
-            transport: httpx.BaseTransport | None = None) -> CollectResult:
+            transport: httpx.BaseTransport | None = None, should_stop=no_stop) -> CollectResult:
     region = config.get("region", "eu")
     base = config.get("base_url") or REGIONS.get(region, REGIONS["eu"])[1]
     if not secrets.get("client_id") or not secrets.get("client_secret"):
         raise CollectorError("Client-ID und Client-Secret fehlen.")
-    cli = Action1Client(base, secrets["client_id"], secrets["client_secret"], timeout, transport)
+    cli = Action1Client(base, secrets["client_id"], secrets["client_secret"], timeout, transport, should_stop)
     res = CollectResult()
     try:
         orgs = list(cli.paged("/organizations"))

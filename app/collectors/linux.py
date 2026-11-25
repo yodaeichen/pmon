@@ -85,8 +85,12 @@ def parse(sec: dict[str, str], config: dict) -> DeviceData:
     return dev
 
 
-def collect(config: dict, secrets: dict, timeout: float = 20):
+def collect(config: dict, secrets: dict, timeout: float = 20, should_stop=None):
+    if should_stop:
+        should_stop()
     sec, new_key = run_sections(config, secrets, SECTIONS, timeout)
+    if should_stop:
+        should_stop()
     dev = parse(sec, config)
     if not dev.software:
         raise CollectorError("Keine Paketliste erhalten (dpkg, rpm oder apk erforderlich).")

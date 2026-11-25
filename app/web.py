@@ -415,6 +415,8 @@ def _source_form_ctx(request, user, db, src, kind, cfg, sec_keys, error=None):
         "user": user, "title": "Quelle" if src and src.id else "Neue Quelle", "src": src, "kind": kind,
         "kinds": SOURCE_KINDS, "cfg": cfg, "sec_keys": sec_keys, "regions": action1.REGIONS,
         "tenants": db.query(Tenant).order_by(Tenant.name).all(), "error": error,
+        "running": bool(src and src.id and scanner.is_running(src.id)),
+        "cancelling": bool(src and src.id and scanner.is_cancelling(src.id)),
     })
 
 
@@ -424,7 +426,8 @@ def sources_page(request: Request, user: User = Depends(require_manager), db: Se
     dev_count = Counter(d.source_id for d in db.query(Device.source_id).all())
     return render(request, "sources.html", {"user": user, "title": "Quellen", "sources": sources,
                                             "kinds": SOURCE_KINDS, "dev_count": dev_count,
-                                            "running": {s.id for s in sources if scanner.is_running(s.id)}})
+                                            "running": {s.id for s in sources if scanner.is_running(s.id)},
+                                            "cancelling": {s.id for s in sources if scanner.is_cancelling(s.id)}})
 
 
 @router.get("/quellen/neu", response_class=HTMLResponse)
@@ -515,6 +518,19 @@ async def source_scan(request: Request, sid: int, user: User = Depends(require_m
         flash(request, f"Scan für „{src.name}“ gestartet – das kann einige Minuten dauern.")
     else:
         flash(request, "Für diese Quelle läuft bereits ein Scan.", "err")
+    return back(request.headers.get("referer") or "/quellen")
+
+
+@router.post("/quellen/{sid}/abbrechen")
+async def source_cancel(request: Request, sid: int, user: User = Depends(require_manager),
+                        db: Session = Depends(get_db), _=Depends(csrf_ok)):
+    src = db.get(Source, sid)
+    if not src:
+        raise HTTPException(404)
+    if scanner.request_cancel(src.id):
+        flash(request, f"Abbruch für „{src.name}“ angefordert – der Scan stoppt in wenigen Sekunden.")
+    else:
+        flash(request, "Für diese Quelle läuft gerade kein Scan.", "err")
     return back(request.headers.get("referer") or "/quellen")
 
 

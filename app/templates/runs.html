@@ -6,7 +6,7 @@
   <thead><tr><th>Start</th><th>Quelle</th><th>Status</th><th>Geräte</th><th>Neu</th><th>Behoben</th><th class="hide-sm">Meldung</th></tr></thead>
   <tbody>{% for r in runs %}
     <tr><td class="nowrap small">{{ fmt_dt(r.started) }}</td><td>{{ r.source.name if r.source }}</td>
-      <td><span class="badge {{ 'b-ok' if r.status == 'ok' else 'p-sofort' if r.status == 'fehler' else 'b-blue' }}">{{ r.status }}</span></td>
+      <td><span class="badge {{ 'b-ok' if r.status == 'ok' else 'p-sofort' if r.status == 'fehler' else 'p-hoch' if r.status == 'abgebrochen' else 'b-blue' }}">{{ r.status }}</span></td>
       <td>{{ r.devices }}</td><td>{{ r.new_findings }}</td><td>{{ r.resolved_findings }}</td><td class="hide-sm small">{{ r.message }}</td></tr>
   {% else %}<tr><td colspan="7" class="empty">Noch keine Scans.</td></tr>{% endfor %}</tbody>
 </table></div>

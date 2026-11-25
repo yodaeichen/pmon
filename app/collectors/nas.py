@@ -147,9 +147,13 @@ def _ini(text: str) -> dict[str, dict[str, str]]:
     return out
 
 
-def collect(kind: str, config: dict, secrets: dict, timeout: float = 20):
+def collect(kind: str, config: dict, secrets: dict, timeout: float = 20, should_stop=None):
     sections = SYNO_SECTIONS if kind == "synology" else QNAP_SECTIONS
+    if should_stop:
+        should_stop()
     sec, new_key = run_sections(config, secrets, sections, timeout)
+    if should_stop:
+        should_stop()
     dev = parse_synology(sec, config) if kind == "synology" else parse_qnap(sec, config)
     if not dev.os_version:
         raise_msg = ("Firmware-Version nicht lesbar – ist das wirklich ein "

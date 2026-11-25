@@ -87,7 +87,7 @@
     <div class="section-title"><h3>Quellen</h3><a href="/quellen" class="small">Verwalten</a></div>
     {% for s in sources %}
       <div class="btns" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--grey-lighter)">
-        <span><span class="dot {{ 'on' if s.last_status == 'ok' else 'off' if s.last_status == 'fehler' }}"></span><a href="/quellen/{{ s.id }}">{{ s.name }}</a></span>
+        <span><span class="dot {{ 'on' if s.last_status == 'ok' else 'off' if s.last_status in ('fehler', 'abgebrochen') }}"></span><a href="/quellen/{{ s.id }}">{{ s.name }}</a></span>
         <span class="small muted">{{ ago(s.last_run) }}</span>
       </div>
     {% else %}<p class="muted">Noch keine Quelle eingerichtet. <a href="/quellen/neu">Jetzt anlegen</a></p>{% endfor %}
@@ -96,7 +96,7 @@
     <div class="section-title"><h3>Letzte Scans</h3><a href="/protokoll" class="small">Protokoll</a></div>
     {% for r in runs %}
       <div style="padding:6px 0;border-bottom:1px solid var(--grey-lighter)">
-        <span class="badge {{ 'b-ok' if r.status == 'ok' else 'p-sofort' if r.status == 'fehler' else 'b-blue' }}">{{ r.status }}</span>
+        <span class="badge {{ 'b-ok' if r.status == 'ok' else 'p-sofort' if r.status == 'fehler' else 'p-hoch' if r.status == 'abgebrochen' else 'b-blue' }}">{{ r.status }}</span>
         <b class="small">{{ r.source.name if r.source }}</b> <span class="small muted">{{ fmt_dt(r.started) }}</span>
         <div class="sub small muted">{{ r.message[:160] }}</div>
       </div>

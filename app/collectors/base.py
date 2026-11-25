@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -56,3 +57,22 @@ class CollectResult:
 
 class CollectorError(Exception):
     pass
+
+
+class ScanCancelled(Exception):
+    """Scan wurde vom Benutzer abgebrochen."""
+
+
+def no_stop() -> None:
+    """Standard-Prüfung ohne Abbruchmöglichkeit."""
+
+
+def wait(seconds: float, should_stop=no_stop) -> None:
+    """Warten, dabei alle 0,5 s auf Abbruch prüfen."""
+    end = time.monotonic() + seconds
+    while True:
+        should_stop()
+        left = end - time.monotonic()
+        if left <= 0:
+            return
+        time.sleep(min(0.5, left))

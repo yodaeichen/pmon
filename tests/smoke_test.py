@@ -47,6 +47,10 @@ def handler(request: httpx.Request) -> httpx.Response:
         if path.endswith("/organizations"):
             return httpx.Response(200, json={"items": [{"id": "org1", "name": "Frisch Motorgeräte"}], "total_items": 1})
         if path.endswith("/endpoints/managed/org1"):
+            if STATE.get("cancel"):
+                from app import scanner as _sc
+
+                _sc.request_cancel(STATE["cancel"])  # simuliert Klick auf „Abbrechen" während des Scans
             return httpx.Response(200, json={"items": [
                 {"id": "ep1", "name": "PC-BUERO-01", "OS": "Windows 11 Pro", "last_seen": "2026-11-25T08:00:00Z",
                  "online_status": "ONLINE"},
@@ -114,7 +118,7 @@ transport = httpx.MockTransport(handler)
 
 from app.collectors import action1, linux, nas  # noqa: E402
 
-action1.time.sleep = lambda s: None  # Wartezeiten im Test überspringen
+action1.wait = lambda seconds, should_stop=None: should_stop() if should_stop else None  # nicht warten
 from app.enrich import feeds  # noqa: E402
 
 action1._transport = transport
@@ -122,8 +126,8 @@ feeds._transport = transport
 _orig_nvd_init = feeds.Nvd.__init__
 
 
-def _fast_nvd_init(self, api_key=None):
-    _orig_nvd_init(self, api_key)
+def _fast_nvd_init(self, api_key=None, should_stop=None):
+    _orig_nvd_init(self, api_key, should_stop)
     self.delay = 0
 
 
@@ -262,6 +266,38 @@ def main():
         db = SessionLocal()
         resolved = [f.cve_id for f in db.query(Finding).filter_by(status="resolved").all()]
         assert resolved == ["CVE-2024-2222"], resolved
+        db.close()
+
+        # Abbrechen während der Abfrage
+        db = SessionLocal()
+        open_before = db.query(Finding).filter_by(status="open").count()
+        db.close()
+        STATE["cancel"] = ids[0]
+        scanner.run_source(ids[0])
+        STATE["cancel"] = None
+        db = SessionLocal()
+        a1 = db.get(Source, ids[0])
+        assert a1.last_status == "abgebrochen" and "Abfrage der Quelle" in a1.last_message, a1.last_message
+        from app.models import ScanRun
+
+        last = db.query(ScanRun).filter_by(source_id=ids[0]).order_by(ScanRun.id.desc()).first()
+        assert last.status == "abgebrochen" and last.finished
+        assert db.query(Finding).filter_by(status="open").count() == open_before
+        db.close()
+        r = c.get("/quellen")
+        assert "abgebrochen" in r.text
+        r = c.post(f"/quellen/{ids[0]}/abbrechen", data={"csrf": tok})
+        assert "läuft gerade kein Scan" in r.text
+        # Hängende Läufe nach Neustart aufräumen
+        db = SessionLocal()
+        db.add(ScanRun(source_id=ids[1], status="laeuft"))
+        db.get(Source, ids[1]).last_status = "laeuft"
+        db.commit()
+        db.close()
+        scanner.cleanup_stale()
+        db = SessionLocal()
+        assert db.query(ScanRun).filter_by(status="laeuft").count() == 0
+        assert db.get(Source, ids[1]).last_status == "abgebrochen"
         db.close()
 
         # Risiko akzeptieren

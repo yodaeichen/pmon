@@ -6,6 +6,7 @@ from datetime import datetime
 
 import httpx
 
+from ..collectors.base import wait as _wait
 from ..config import settings
 
 NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
@@ -24,7 +25,8 @@ def client() -> httpx.Client:
 
 # ------------------------------------------------------------------ NVD
 class Nvd:
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, should_stop=None):
+        self.should_stop = should_stop or (lambda: None)
         self.api_key = api_key or None
         self.delay = 0.8 if self.api_key else 6.5  # NVD: 50 bzw. 5 Anfragen / 30 s
         self._last = 0.0
@@ -34,15 +36,16 @@ class Nvd:
         self.http.close()
 
     def _get(self, params: dict) -> dict:
-        wait = self.delay - (time.time() - self._last)
-        if wait > 0:
-            time.sleep(wait)
+        pause = self.delay - (time.time() - self._last)
+        if pause > 0:
+            _wait(pause, self.should_stop)
         headers = {"apiKey": self.api_key} if self.api_key else {}
         for attempt in range(3):
+            self.should_stop()
             self._last = time.time()
             r = self.http.get(NVD_URL, params=params, headers=headers)
             if r.status_code in (403, 429, 503) and attempt < 2:
-                time.sleep(10 * (attempt + 1))
+                _wait(10 * (attempt + 1), self.should_stop)
                 continue
             r.raise_for_status()
             return r.json()
