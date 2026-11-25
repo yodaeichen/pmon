@@ -234,7 +234,8 @@ EOF
 header
 [ "$(id -u)" -eq 0 ] || die "Bitte als root auf dem Proxmox-Host ausführen."
 command -v pct >/dev/null && command -v pveam >/dev/null || die "Das ist kein Proxmox-VE-Host (pct/pveam fehlen)."
-[ "$(dpkg --print-architecture 2>/dev/null || echo amd64)" = "amd64" ] || die "Nur amd64 wird unterstützt."
+ARCH="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
+[ "$ARCH" = "amd64" ] || [ "$ARCH" = "arm64" ] || die "Architektur ${ARCH} wird nicht unterstützt."
 detect_defaults
 
 INTERACTIVE=0
@@ -263,9 +264,12 @@ if pct status "$CTID" >/dev/null 2>&1; then die "Container $CTID existiert berei
 # ------------------------------------------------------------- Vorlage
 msg_info "Suche Debian-${DEBIAN_VERSION}-Vorlage"
 pveam update >/dev/null 2>&1 || msg_warn "pveam update fehlgeschlagen – nutze vorhandene Liste"
-TEMPLATE="$(pveam available --section system 2>/dev/null | awk -v p="debian-${DEBIAN_VERSION}-standard" '$2 ~ "^"p {print $2}' | sort -V | tail -1)"
-[ -n "$TEMPLATE" ] || die "Keine Vorlage für Debian ${DEBIAN_VERSION} gefunden."
-if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$TEMPLATE"; then
+# Nur Vorlagen passend zur Architektur des Hosts (Proxmox listet amd64 und arm64)
+TEMPLATE="$(pveam available --section system 2>/dev/null \
+  | awk -v p="debian-${DEBIAN_VERSION}-standard_" -v a="_${ARCH}.tar" 'index($2, p) == 1 && index($2, a) > 0 {print $2}' \
+  | sort -V | tail -1)"
+[ -n "$TEMPLATE" ] || die "Keine Vorlage für Debian ${DEBIAN_VERSION} (${ARCH}) gefunden."
+if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -qF "vztmpl/${TEMPLATE}"; then
   msg_info "Lade ${TEMPLATE}"
   pveam download "$TEMPLATE_STORAGE" "$TEMPLATE" >/dev/null || die "Download der Vorlage fehlgeschlagen."
 fi
@@ -285,7 +289,11 @@ OPTS=(--hostname "$CT_HOSTNAME" --cores "$CORES" --memory "$RAM" --swap "$SWAP"
 msg_info "Lege Container ${CTID} an"
 pct create "$CTID" "${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}" "${OPTS[@]}" >/dev/null || die "pct create fehlgeschlagen."
 msg_ok "Container ${CTID} angelegt"
-pct start "$CTID"
+if ! pct start "$CTID"; then
+  msg_error "Container ${CTID} startet nicht – er wird wieder entfernt."
+  pct destroy "$CTID" --purge >/dev/null 2>&1 || true
+  die "Start fehlgeschlagen. Details: pct start ${CTID} --debug (vor dem Löschen) bzw. journalctl -xe"
+fi
 msg_ok "Container gestartet"
 
 msg_info "Warte auf Netzwerk"
