@@ -1,11 +1,11 @@
-# Installationsvorschlag – Patchmonitor unter pmon.mbit.solutions
+# Installationsvorschlag – pmon unter pmon.mbit.solutions
 
 Dieser Vorschlag beschreibt den Betrieb als eigener LXC auf Proxmox, erreichbar über den vorhandenen Nginx Proxy Manager (NPM) mit dem Wildcard-Zertifikat `*.mbit.solutions`.
 
 ## 1. Zielbild
 
 ```
- Browser ──HTTPS──▶ Nginx Proxy Manager ──HTTP :8000──▶ LXC „patchmonitor“ (Debian)
+ Browser ──HTTPS──▶ Nginx Proxy Manager ──HTTP :8000──▶ LXC „pmon“ (Debian)
  (intern, Pi-hole)   pmon.mbit.solutions                   │
                      Wildcard-Zertifikat                   ├──HTTPS──▶ Action1-API (app.eu.action1.com)
                                                            ├──HTTPS──▶ NVD, CISA KEV, FIRST EPSS, OSV.dev
@@ -18,10 +18,10 @@ Dieser Vorschlag beschreibt den Betrieb als eigener LXC auf Proxmox, erreichbar 
 | Container | Debian 13 (bzw. 12), unprivilegiert, `nesting=1`, Autostart |
 | Ressourcen | 2 Kerne, 1 GB RAM, 512 MB Swap, 8 GB Platte (reicht für mehrere hundert Geräte) |
 | Netz | Verwaltungs-/Server-Netz, **feste IP** (oder DHCP-Reservierung), da NPM auf die IP weiterleitet |
-| Dienst | systemd `patchmonitor.service`, läuft als eigener Benutzer `patchmonitor`, Port 8000 |
-| Daten | `/var/lib/patchmonitor` (SQLite-Datenbank, KEV-Zwischenspeicher) |
-| Konfiguration | `/etc/patchmonitor.env` (Schlüssel, Domain), nur root und Dienstbenutzer lesbar |
-| Programm | `/opt/patchmonitor` (Git-Checkout + Python-venv) |
+| Dienst | systemd `pmon.service`, läuft als eigener Benutzer `pmon`, Port 8000 |
+| Daten | `/var/lib/pmon` (SQLite-Datenbank, KEV-Zwischenspeicher) |
+| Konfiguration | `/etc/pmon.env` (Schlüssel, Domain), nur root und Dienstbenutzer lesbar |
+| Programm | `/opt/pmon` (Git-Checkout + Python-venv) |
 
 ## 2. Vorbereitung
 
@@ -35,26 +35,36 @@ Dieser Vorschlag beschreibt den Betrieb als eigener LXC auf Proxmox, erreichbar 
 Auf dem Proxmox-Host (z. B. `pve-eichen`) als root:
 
 ```bash
-IP=172.15.15.60/24 GW=172.15.15.1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/patchmonitor/main/proxmox/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/pmon/main/proxmox/install.sh)"
 ```
 
 Ablauf:
 
-1. Das Skript zeigt eine Zusammenfassung (CTID, Speicher, Netz) und fragt nach.
-2. Es lädt die aktuelle Debian-Vorlage, legt den Container an und startet ihn.
-3. Im Container läuft `scripts/setup.sh`:
-   - installiert Pakete, Python-Umgebung und Dienst,
-   - erzeugt Schlüssel und den ersten Admin-Zugang.
-4. Zum Schluss kommt die Frage **„Proxy-Host im Nginx Proxy Manager jetzt anlegen?“**:
-   - Bei *j* fragt das Skript nach NPM-Adresse (z. B. `http://172.15.15.10:81`), Benutzer und Passwort.
-   - Es legt `pmon.mbit.solutions` an, weist das Wildcard-Zertifikat zu und erzwingt SSL.
+1. Im Auswahldialog **Erweitert** wählen. Die wichtigsten Werte:
+   - **Container-ID:** frei wählbar, belegte IDs werden abgelehnt
+   - **Speicher:** z. B. `local-lvm` oder dein ZFS-Pool
+   - **Bridge:** vmbr0/vmbr1 mit VLAN-Tag des Server-Netzes
+   - **Feste IP** `172.15.15.60/24`, Gateway `172.15.15.1`
+   - **DNS** = Pi-hole
+2. Bei der Frage nach dem **Nginx Proxy Manager** „Ja“ wählen und die Zugangsdaten angeben:
+   - NPM-Adresse, z. B. `http://172.15.15.10:81`
+   - Benutzer und Passwort
+   - optional eine Zugriffsliste, z. B. „Nur intern“
 
-Der erste Zugang (Benutzer `admin` + Zufallspasswort) wird angezeigt und liegt zusätzlich im Container unter `/root/patchmonitor-zugang.txt`.
+   Das Passwort wird nicht gespeichert.
+3. Die Zusammenfassung prüfen und bestätigen. Ab jetzt läuft alles ohne Rückfragen:
+   - Debian-Vorlage laden, Container anlegen und starten
+   - pmon installieren (`scripts/setup.sh`)
+   - Proxy-Host `pmon.mbit.solutions` mit Wildcard-Zertifikat und „Force SSL“ anlegen
+
+Wer keine Dialoge möchte, setzt `MODE=auto` und gibt die Werte als Variablen vor (Tabelle im README).
+
+Der erste Zugang (Benutzer `admin` + Zufallspasswort) wird angezeigt und liegt zusätzlich im Container unter `/root/pmon-zugang.txt`.
 
 ### NPM später oder erneut einrichten
 
 ```bash
-TARGET_HOST=172.15.15.60 bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/patchmonitor/main/scripts/npm-proxy.sh)"
+TARGET_HOST=172.15.15.60 bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/pmon/main/scripts/npm-proxy.sh)"
 ```
 
 Optional mit `ACCESS_LIST="Nur intern"`: Dann wird eine vorhandene NPM-Zugriffsliste zugewiesen, z. B. eine, die nur `172.15.15.0/24` und das VPN zulässt.
@@ -69,15 +79,15 @@ Optional mit `ACCESS_LIST="Nur intern"`: Dann wird eine vorhandene NPM-Zugriffsl
 ## 4. Härtung nach der Installation
 
 1. `https://pmon.mbit.solutions` öffnen, als `admin` anmelden. Unter **Mein Konto** das Passwort ändern.
-2. Zugangsdatei im Container löschen: `pct exec <CTID> -- rm /root/patchmonitor-zugang.txt`.
-3. In `/etc/patchmonitor.env` `TRUSTED_PROXIES=*` durch die IP des NPM ersetzen. Danach den Dienst neu starten: `pct exec <CTID> -- systemctl restart patchmonitor`.
+2. Zugangsdatei im Container löschen: `pct exec <CTID> -- rm /root/pmon-zugang.txt`.
+3. In `/etc/pmon.env` `TRUSTED_PROXIES=*` durch die IP des NPM ersetzen. Danach den Dienst neu starten: `pct exec <CTID> -- systemctl restart pmon`.
 4. Firewall (OPNsense):
    - **Zum Container** nur Port 8000 vom NPM zulassen.
    - **Vom Container** zulassen:
      - HTTPS ins Internet für Action1, NVD, CISA, FIRST und OSV
      - SSH (22) zu den NAS-Systemen und Servern
      - SMTP (587) zu mailcow
-5. **Backup:** Den Container in den regulären vzdump-Job aufnehmen. Wichtig sind `/var/lib/patchmonitor` **und** `/etc/patchmonitor.env`. Ohne `FERNET_KEY` lassen sich die gespeicherten Zugangsdaten nicht mehr entschlüsseln.
+5. **Backup:** Den Container in den regulären vzdump-Job aufnehmen. Wichtig sind `/var/lib/pmon` **und** `/etc/pmon.env`. Ohne `FERNET_KEY` lassen sich die gespeicherten Zugangsdaten nicht mehr entschlüsseln.
 
 ## 5. Quellen einrichten
 
@@ -93,8 +103,8 @@ Das empfohlene Intervall ist 60 Minuten. Mit Software-Inventar sind es mehr API-
 ### Synology
 1. Auf dem NAS einen eigenen Benutzer anlegen, z. B. `pmon`. Für SSH muss er in der Gruppe *administrators* sein.
 2. Unter *Systemsteuerung → Terminal & SNMP* SSH aktivieren, am besten nur aus dem Verwaltungsnetz.
-3. In Patchmonitor *Neue Quelle → Synology NAS* anlegen: Host, Benutzer, Passwort oder SSH-Schlüssel, Kunde.
-4. Patchmonitor liest nur:
+3. In pmon *Neue Quelle → Synology NAS* anlegen: Host, Benutzer, Passwort oder SSH-Schlüssel, Kunde.
+4. pmon liest nur:
    - `/etc.defaults/VERSION`
    - Modell
    - `/var/packages/*/INFO`
@@ -102,13 +112,13 @@ Das empfohlene Intervall ist 60 Minuten. Mit Software-Inventar sind es mehr API-
 ### QNAP
 1. Unter *Systemsteuerung → Netzwerk- & Dateidienste → Telnet/SSH* SSH aktivieren. Einen eigenen Administrator verwenden.
 2. In der Quelle **QTS** oder **QuTS hero** wählen.
-3. Patchmonitor liest:
+3. pmon liest:
    - `getcfg System …` (Version, Build, Modell)
    - `/etc/config/qpkg.conf`
 
 ### Linux / Proxmox
 1. Auf dem Server einen normalen Benutzer ohne sudo anlegen. Den öffentlichen Schlüssel in `~/.ssh/authorized_keys` eintragen.
-2. Patchmonitor liest nur `/etc/os-release` und die Paketliste (`dpkg-query`, `rpm` bzw. `apk`).
+2. pmon liest nur `/etc/os-release` und die Paketliste (`dpkg-query`, `rpm` bzw. `apk`).
 3. Auf Proxmox-Hosts werden die Debian-Pakete geprüft. Die Proxmox-eigenen Pakete (pve-*, proxmox-kernel) kennt OSV nicht. Für Proxmox-Updates weiterhin PatchMon bzw. `apt list --upgradable` nutzen.
 
 ## 6. Benachrichtigung
@@ -126,10 +136,10 @@ Unter *Einstellungen*:
 
 | Aufgabe | Befehl |
 |---|---|
-| Aktualisieren | `pct exec <CTID> -- patchmonitor-update` |
-| Protokoll ansehen | `pct exec <CTID> -- journalctl -u patchmonitor -f` |
-| Neustart | `pct exec <CTID> -- systemctl restart patchmonitor` |
-| Admin-Passwort zurücksetzen | `pct exec <CTID> -- bash -c 'cd /opt/patchmonitor && set -a && . /etc/patchmonitor.env && .venv/bin/python -m app.bootstrap reset-password admin'` |
+| Aktualisieren | `pct exec <CTID> -- pmon-update` |
+| Protokoll ansehen | `pct exec <CTID> -- journalctl -u pmon -f` |
+| Neustart | `pct exec <CTID> -- systemctl restart pmon` |
+| Admin-Passwort zurücksetzen | `pct exec <CTID> -- bash -c 'cd /opt/pmon && set -a && . /etc/pmon.env && .venv/bin/python -m app.bootstrap reset-password admin'` |
 
 ## 8. Grenzen der Version 1.0
 

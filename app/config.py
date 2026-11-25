@@ -1,4 +1,4 @@
-"""Einstellungen aus Umgebungsvariablen (im Container: /etc/patchmonitor.env)."""
+"""Einstellungen aus Umgebungsvariablen (im Container: /etc/pmon.env)."""
 import os
 import secrets
 from pathlib import Path
@@ -9,7 +9,7 @@ class Settings:
         self.data_dir = Path(os.environ.get("DATA_DIR", "./data")).resolve()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.database_url = os.environ.get(
-            "DATABASE_URL", f"sqlite:///{self.data_dir / 'patchmonitor.db'}"
+            "DATABASE_URL", f"sqlite:///{self.data_dir / 'pmon.db'}"
         )
         # SECRET_KEY signiert die Sitzungs-Cookies, FERNET_KEY verschlüsselt
         # gespeicherte Zugangsdaten (API-Secrets, SSH-Passwörter/-Schlüssel).
@@ -18,7 +18,7 @@ class Settings:
         self.base_url = os.environ.get("BASE_URL", "").rstrip("/")
         self.scheduler_enabled = os.environ.get("SCHEDULER", "true").lower() == "true"
         self.http_timeout = float(os.environ.get("HTTP_TIMEOUT", "30"))
-        self.repo = os.environ.get("REPO", "yodaeichen/patchmonitor")
+        self.repo = os.environ.get("REPO", "yodaeichen/pmon")
 
     def _persisted(self, name: str, fernet: bool = False) -> str:
         """Fallback für Entwicklung/Docker: Schlüssel einmalig erzeugen und ablegen."""

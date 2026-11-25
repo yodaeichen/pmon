@@ -19,7 +19,7 @@ _transport: httpx.BaseTransport | None = None  # für Tests austauschbar
 
 def client() -> httpx.Client:
     return httpx.Client(timeout=settings.http_timeout, transport=_transport,
-                        headers={"User-Agent": "Patchmonitor (+https://github.com/%s)" % settings.repo})
+                        headers={"User-Agent": "pmon (+https://github.com/%s)" % settings.repo})
 
 
 # ------------------------------------------------------------------ NVD

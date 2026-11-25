@@ -1,4 +1,4 @@
-"""Patchmonitor – Schwachstellen-Dashboard für Action1, NAS und Linux."""
+"""pmon – Schwachstellen-Dashboard für Action1, NAS und Linux."""
 import asyncio
 import logging
 import os
@@ -21,7 +21,7 @@ from .models import Source, utcnow
 from .risk import PRIORITIES, priority, severity_de
 from .security import csrf_token
 
-log = logging.getLogger("patchmonitor")
+log = logging.getLogger("pmon")
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -98,7 +98,7 @@ async def lifespan(app: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="Patchmonitor", version=__version__, lifespan=lifespan,
+app = FastAPI(title="pmon", version=__version__, lifespan=lifespan,
               docs_url=None, redoc_url=None, openapi_url=None)
 
 

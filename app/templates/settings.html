@@ -31,7 +31,7 @@
     <h4 class="section">Webhook</h4>
     <div class="form-grid">
       <div class="field"><label>URL</label><input type="url" name="webhook_url" value="{{ s.webhook_url }}" placeholder="z. B. Webhook-Quelle im DIVERA Gateway, Teams, n8n"></div>
-      {{ secret("webhook_secret", "Geheimnis (optional)", "wird als Header <code>X-Patchmonitor-Secret</code> mitgeschickt") }}
+      {{ secret("webhook_secret", "Geheimnis (optional)", "wird als Header <code>X-Pmon-Secret</code> mitgeschickt") }}
     </div>
   </div>
 

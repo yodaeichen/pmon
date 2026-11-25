@@ -1,6 +1,6 @@
-# Patchmonitor
+# pmon – Patch- & Schwachstellenmonitor
 
-**Schwachstellen-Dashboard für kleine IT-Umgebungen.** Patchmonitor sammelt installierte Software und bekannte Sicherheitslücken aus **Action1**, von **Synology- und QNAP-NAS** sowie von **Linux-Servern und Proxmox**. Es reichert die Funde mit **CISA KEV**, **FIRST EPSS** und der **NVD** an und zeigt pro Kunde verständlich, was zuerst zu tun ist und wie.
+**Schwachstellen-Dashboard für kleine IT-Umgebungen.** pmon sammelt installierte Software und bekannte Sicherheitslücken aus **Action1**, von **Synology- und QNAP-NAS** sowie von **Linux-Servern und Proxmox**. Es reichert die Funde mit **CISA KEV**, **FIRST EPSS** und der **NVD** an und zeigt pro Kunde verständlich, was zuerst zu tun ist und wie.
 
 Ein Open-Source-Projekt von [MB-IT Solutions](https://www.mbit.solutions) · powered by [yodaeichen](https://github.com/yodaeichen)
 
@@ -27,39 +27,51 @@ Ein Open-Source-Projekt von [MB-IT Solutions](https://www.mbit.solutions) · pow
 Auf dem Proxmox-Host als root:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/patchmonitor/main/proxmox/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/pmon/main/proxmox/install.sh)"
 ```
 
-Das Skript erledigt Folgendes:
+Wie bei den Proxmox Helper Scripts öffnet sich ein Auswahldialog:
 
-- Es legt einen unprivilegierten Debian-LXC an: 2 Kerne, 1 GB RAM, 8 GB.
-- Es installiert Patchmonitor als systemd-Dienst auf Port 8000.
-- Am Ende zeigt es den ersten Zugang an.
-- Auf Wunsch legt es gleich den Proxy-Host im **Nginx Proxy Manager** an.
+- **Standard:** nächste freie ID, 2 Kerne, 1 GB RAM, 8 GB, DHCP. Danach nur noch die Frage nach dem Nginx Proxy Manager.
+- **Erweitert:** Jeder Wert wird einzeln abgefragt und geprüft:
+  - Container-ID, Hostname, Debian 13 oder 12, unprivilegiert oder privilegiert, root-Passwort
+  - Kerne, RAM, Swap, Festplatte
+  - Speicher und Bridge (Auswahlliste mit freiem Platz bzw. IP)
+  - feste IP mit Gateway oder DHCP, VLAN, DNS-Server, Autostart
+  - Domain, Port, GitHub-Zweig
+  - NPM-Zugang und Zugriffsliste
 
-Mit fester IP:
+Am Ende zeigt eine Zusammenfassung alle Werte, erst dann wird installiert. „Abbrechen“ in jedem Dialog beendet das Skript, ohne etwas anzulegen.
+
+Das Skript legt einen Debian-LXC an, installiert pmon als systemd-Dienst auf Port 8000 und zeigt den ersten Zugang. Auf Wunsch richtet es gleich den Proxy-Host im **Nginx Proxy Manager** ein.
+
+**Ohne Rückfragen** (z. B. für Automatisierung) mit `MODE=auto` und Variablen:
 
 ```bash
-IP=172.15.15.60/24 GW=172.15.15.1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/patchmonitor/main/proxmox/install.sh)"
+MODE=auto CTID=120 IP=172.15.15.60/24 GW=172.15.15.1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/pmon/main/proxmox/install.sh)"
 ```
 
 | Variable | Standard | Bedeutung |
 |---|---|---|
+| `MODE` | Auswahl | `default`, `advanced` oder `auto` (ohne Dialoge) |
 | `CTID` | nächste freie | Container-ID |
-| `CT_HOSTNAME` | `patchmonitor` | Hostname |
-| `CORES` / `RAM` / `DISK` | `2` / `1024` / `8` | Ressourcen (MB, GB) |
-| `STORAGE` | `local-lvm` bzw. erster passender | Speicher für das Root-Dateisystem |
+| `CT_HOSTNAME` | `pmon` | Hostname |
+| `DEBIAN_VERSION` | `13` | `13` oder `12` |
+| `UNPRIVILEGED` | `1` | `0` = privilegierter Container |
+| `CORES` / `RAM` / `SWAP` / `DISK` | `2` / `1024` / `512` / `8` | Ressourcen (MB, GB) |
+| `STORAGE` / `TEMPLATE_STORAGE` | `local-lvm` / erster passender | Speicher |
 | `BRIDGE` / `VLAN` | `vmbr0` / – | Netzwerk |
-| `IP` / `GW` / `DNS` | `dhcp` / – / – | Adresse, z. B. `IP=172.15.15.60/24` |
-| `DOMAIN` | `pmon.mbit.solutions` | Adresse hinter dem Reverse Proxy |
-| `NPM_SETUP` | `ask` | `yes` / `no`: NPM ohne Rückfrage einrichten bzw. überspringen |
+| `IP` / `GW` / `DNS` | `dhcp` / – / – | z. B. `IP=172.15.15.60/24` |
+| `ONBOOT` | `1` | Autostart |
+| `DOMAIN` / `PORT` | `pmon.mbit.solutions` / `8000` | Adresse und interner Port |
+| `NPM_SETUP` | `no` bei `auto` | `yes` mit `NPM_URL`, `NPM_EMAIL`, `NPM_PASSWORD`, `ACCESS_LIST` |
 
 ### Nginx Proxy Manager (Einzeiler)
 
 Auf einem Rechner, der die NPM-Verwaltung erreicht (z. B. dem Proxmox-Host):
 
 ```bash
-TARGET_HOST=172.15.15.60 bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/patchmonitor/main/scripts/npm-proxy.sh)"
+TARGET_HOST=172.15.15.60 bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/pmon/main/scripts/npm-proxy.sh)"
 ```
 
 Das Skript meldet sich per API am NPM an und legt den Proxy-Host `pmon.mbit.solutions` an oder aktualisiert ihn. Dabei geschieht Folgendes:
@@ -71,7 +83,7 @@ Das Skript meldet sich per API am NPM an und legt den Proxy-Host `pmon.mbit.solu
 ### Aktualisieren
 
 ```bash
-pct exec <CTID> -- patchmonitor-update
+pct exec <CTID> -- pmon-update
 ```
 
 Ausführliche Anleitung mit Netzplan, Firewall-Regeln und Einrichtung der Quellen: **[docs/INSTALLATION.md](docs/INSTALLATION.md)**
@@ -80,7 +92,7 @@ Ausführliche Anleitung mit Netzplan, Firewall-Regeln und Einrichtung der Quelle
 
 - **Debian/Ubuntu:**
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/yodaeichen/patchmonitor/main/scripts/setup.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/yodaeichen/pmon/main/scripts/setup.sh | bash
   ```
 - **Docker:** `docker compose up -d` startet auf Port 8000. Der erste Zugang steht im Log.
 
@@ -102,8 +114,8 @@ Aufbau:
 ## Datenquellen & Lizenzen
 
 - Schwachstellendaten: [NVD](https://nvd.nist.gov) (NIST), [CISA KEV](https://www.cisa.gov/known-exploited-vulnerabilities-catalog), [FIRST EPSS](https://www.first.org/epss), [OSV.dev](https://osv.dev). Die Nutzung erfolgt nach deren Bedingungen. *This product uses data from the NVD API but is not endorsed or certified by the NVD.*
-- Action1 ist eine Marke der Action1 Corporation. Patchmonitor ist kein offizielles Action1-Produkt und nutzt nur deren öffentliche API.
+- Action1 ist eine Marke der Action1 Corporation. pmon ist kein offizielles Action1-Produkt und nutzt nur deren öffentliche API.
 - Schriften Archivo und IBM Plex Sans: SIL Open Font License. Icons: Lucide (ISC).
-- Patchmonitor selbst: [MIT-Lizenz](LICENSE).
+- pmon selbst: [MIT-Lizenz](LICENSE).
 
 Gefällt dir das Projekt? [Unterstütze es auf GitHub Sponsors](https://github.com/sponsors/yodaeichen) ♥

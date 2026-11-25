@@ -17,7 +17,7 @@ from .models import Cve, Device, Finding, OsvCache, ScanRun, Software, Source, T
 from .risk import PRIORITIES, priority, severity_from_score
 from .security import decrypt_json
 
-log = logging.getLogger("patchmonitor.scan")
+log = logging.getLogger("pmon.scan")
 _lock = threading.Lock()
 _running: set[int] = set()
 

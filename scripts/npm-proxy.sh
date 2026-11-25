@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Patchmonitor – Proxy-Host im Nginx Proxy Manager per API anlegen oder aktualisieren.
+# pmon – Proxy-Host im Nginx Proxy Manager per API anlegen oder aktualisieren.
 #
-#   TARGET_HOST=172.15.15.60 bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/patchmonitor/main/scripts/npm-proxy.sh)"
+#   TARGET_HOST=172.15.15.60 bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/pmon/main/scripts/npm-proxy.sh)"
 #
 # Variablen: NPM_URL (z. B. http://172.15.15.10:81), NPM_EMAIL, NPM_PASSWORD, DOMAIN, TARGET_HOST,
 #            TARGET_PORT (8000), CERT_ID (sonst automatisch passendes/Wildcard-Zertifikat),
@@ -18,7 +18,7 @@ command -v python3 >/dev/null || { echo "python3 wird benötigt." >&2; exit 1; }
 [ -n "${NPM_URL:-}" ]      || NPM_URL="$(ask "Adresse der NPM-Verwaltung (z. B. http://172.15.15.10:81): ")"
 [ -n "${NPM_EMAIL:-}" ]    || NPM_EMAIL="$(ask "NPM-Benutzer (E-Mail): ")"
 [ -n "${NPM_PASSWORD:-}" ] || NPM_PASSWORD="$(asks "NPM-Passwort: ")"
-[ -n "${TARGET_HOST:-}" ]  || TARGET_HOST="$(ask "IP des Patchmonitor-Containers: ")"
+[ -n "${TARGET_HOST:-}" ]  || TARGET_HOST="$(ask "IP des pmon-Containers: ")"
 if [ -z "${ACCESS_LIST+x}" ]; then
   ACCESS_LIST="$(ask "Name einer NPM-Zugriffsliste (leer = keine): ")"
 fi

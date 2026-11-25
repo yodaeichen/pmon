@@ -322,7 +322,7 @@ def export_csv(kunde: int | None = None, user: User = Depends(require_user), db:
                     f.first_seen.strftime("%Y-%m-%d") if f.first_seen else ""])
     data = "﻿" + buf.getvalue()  # BOM, damit Excel Umlaute richtig liest
     return StreamingResponse(iter([data]), media_type="text/csv; charset=utf-8",
-                             headers={"Content-Disposition": "attachment; filename=patchmonitor-schwachstellen.csv"})
+                             headers={"Content-Disposition": "attachment; filename=pmon-schwachstellen.csv"})
 
 
 # --------------------------------------------------------------- Geräte
@@ -621,14 +621,14 @@ async def settings_test(request: Request, what: str = Form(...), user: User = De
     cfg, sec = settings_store.get_all(db), settings_store.get_secrets(db)
     try:
         if what == "mail":
-            notify.send_mail(cfg, sec, "Patchmonitor Testnachricht", "Wenn du das liest, funktioniert der Mailversand.")
+            notify.send_mail(cfg, sec, "pmon Testnachricht", "Wenn du das liest, funktioniert der Mailversand.")
             flash(request, f"Testmail an {cfg.get('smtp_to')} gesendet.")
         elif what == "webhook":
             import httpx
 
             headers = {"Content-Type": "application/json"}
             if sec.get("webhook_secret"):
-                headers["X-Patchmonitor-Secret"] = sec["webhook_secret"]
+                headers["X-Pmon-Secret"] = sec["webhook_secret"]
             httpx.post(cfg["webhook_url"], content=notify.test_payload(), headers=headers,
                        timeout=15).raise_for_status()
             flash(request, "Webhook erfolgreich aufgerufen.")

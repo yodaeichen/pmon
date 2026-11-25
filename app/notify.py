@@ -32,9 +32,9 @@ def send(db, findings) -> str:
     from .config import settings
 
     base_url = settings.base_url
-    subject = f"Patchmonitor: {len(findings)} neue Schwachstelle(n) mit hoher Priorität"
+    subject = f"pmon: {len(findings)} neue Schwachstelle(n) mit hoher Priorität"
     body = "\n".join(["Neue Funde seit dem letzten Scan:", ""] + _lines(findings, base_url)
-                     + ["", "— Patchmonitor · MB-IT Solutions"])
+                     + ["", "— pmon · MB-IT Solutions"])
     results = []
     if cfg.get("smtp_host") and cfg.get("smtp_to"):
         try:
@@ -45,7 +45,7 @@ def send(db, findings) -> str:
     if cfg.get("webhook_url"):
         try:
             payload = {
-                "event": "patchmonitor.new_findings",
+                "event": "pmon.new_findings",
                 "title": subject,
                 "text": body,
                 "findings": [{
@@ -58,7 +58,7 @@ def send(db, findings) -> str:
             }
             headers = {}
             if sec.get("webhook_secret"):
-                headers["X-Patchmonitor-Secret"] = sec["webhook_secret"]
+                headers["X-Pmon-Secret"] = sec["webhook_secret"]
             httpx.post(cfg["webhook_url"], json=payload, headers=headers, timeout=15).raise_for_status()
             results.append("Webhook gesendet")
         except Exception as exc:  # noqa: BLE001
@@ -87,5 +87,5 @@ def send_mail(cfg: dict, sec: dict, subject: str, body: str) -> None:
 
 
 def test_payload() -> str:
-    return json.dumps({"event": "patchmonitor.test", "title": "Patchmonitor Testnachricht",
+    return json.dumps({"event": "pmon.test", "title": "pmon Testnachricht",
                        "text": "Wenn du das liest, funktioniert der Webhook."})

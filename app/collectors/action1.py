@@ -60,7 +60,7 @@ class Action1Client:
         self.client_secret = client_secret
         self.http = httpx.Client(timeout=timeout, transport=transport or _transport,
                                  headers={"Accept": "application/json",
-                                          "User-Agent": "Patchmonitor"})
+                                          "User-Agent": "pmon"})
         self.token = None
 
     def close(self):

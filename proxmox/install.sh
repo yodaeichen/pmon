@@ -1,147 +1,347 @@
 #!/usr/bin/env bash
-# Patchmonitor – Einzeiler für Proxmox VE (auf dem Host als root):
+# pmon – Installer für Proxmox VE (auf dem Host als root):
 #
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/patchmonitor/main/proxmox/install.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/yodaeichen/pmon/main/proxmox/install.sh)"
 #
-# Anpassbar über Variablen vor dem Befehl, z. B.:
-#   CTID=120 IP=172.15.15.60/24 GW=172.15.15.1 bash -c "$(curl -fsSL …/install.sh)"
+# Interaktiv mit Auswahldialogen („Standard" oder „Erweitert"), wie die Proxmox Helper Scripts.
+# Ohne Rückfragen: MODE=auto und Werte als Variablen vorgeben, z. B.
+#   MODE=auto CTID=120 IP=172.15.15.60/24 GW=172.15.15.1 bash -c "$(curl -fsSL …/install.sh)"
 set -euo pipefail
+shopt -s inherit_errexit  # Abbruch in Dialogen (Befehlsersetzung) beendet das ganze Skript
 
-REPO="${REPO:-yodaeichen/patchmonitor}"
+# ------------------------------------------------------------- Vorgaben
+APP="pmon"
+REPO="${REPO:-yodaeichen/pmon}"
 BRANCH="${BRANCH:-main}"
+MODE="${MODE:-}"                    # leer = fragen | default | advanced | auto
 DOMAIN="${DOMAIN:-pmon.mbit.solutions}"
-CT_HOSTNAME="${CT_HOSTNAME:-patchmonitor}"
+PORT="${PORT:-8000}"
+CT_HOSTNAME="${CT_HOSTNAME:-pmon}"
+DEBIAN_VERSION="${DEBIAN_VERSION:-13}"
+UNPRIVILEGED="${UNPRIVILEGED:-1}"
+CT_PASSWORD="${CT_PASSWORD:-}"
 CORES="${CORES:-2}"
 RAM="${RAM:-1024}"
 SWAP="${SWAP:-512}"
 DISK="${DISK:-8}"
-BRIDGE="${BRIDGE:-vmbr0}"
+BRIDGE="${BRIDGE:-}"
 VLAN="${VLAN:-}"
 IP="${IP:-dhcp}"
 GW="${GW:-}"
 DNS="${DNS:-}"
-PORT="${PORT:-8000}"
+ONBOOT="${ONBOOT:-1}"
 STORAGE="${STORAGE:-}"
 TEMPLATE_STORAGE="${TEMPLATE_STORAGE:-}"
-NPM_SETUP="${NPM_SETUP:-ask}"   # ask | yes | no
+NPM_SETUP="${NPM_SETUP:-}"          # yes | no (leer = je nach Modus)
+NPM_URL="${NPM_URL:-}"
+NPM_EMAIL="${NPM_EMAIL:-}"
+NPM_PASSWORD="${NPM_PASSWORD:-}"
+ACCESS_LIST="${ACCESS_LIST:-}"
 RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+BACKTITLE="pmon · MB-IT Solutions · github.com/${REPO}"
 
-c_b=$'\033[1;34m'; c_g=$'\033[1;32m'; c_r=$'\033[1;31m'; c_y=$'\033[1;33m'; c_0=$'\033[0m'
-say()  { printf '%s==>%s %s\n' "$c_b" "$c_0" "$*"; }
-ok()   { printf '%s ✓ %s %s\n' "$c_g" "$c_0" "$*"; }
-warn() { printf '%s ! %s %s\n' "$c_y" "$c_0" "$*"; }
-die()  { printf '%sFehler:%s %s\n' "$c_r" "$c_0" "$*" >&2; exit 1; }
-ask()  { local a=""; if [ -r /dev/tty ]; then read -r -p "$1" a </dev/tty || true; fi; printf '%s' "$a"; }
+# ------------------------------------------------------------- Ausgabe
+BL=$'\033[36m'; GN=$'\033[1;92m'; RD=$'\033[01;31m'; YW=$'\033[33m'; BD=$'\033[1m'; CL=$'\033[m'
+msg_info()  { printf '  %s⏳%s %s\n' "$YW" "$CL" "$*"; }
+msg_ok()    { printf '  %s✔%s  %s\n' "$GN" "$CL" "$*"; }
+msg_warn()  { printf '  %s!%s  %s\n' "$YW" "$CL" "$*"; }
+msg_error() { printf '  %s✖%s  %s\n' "$RD" "$CL" "$*" >&2; }
+die()       { msg_error "$*"; exit 1; }
+cancelled() { clear >&2 2>/dev/null || true; msg_warn "Abgebrochen – es wurde nichts verändert." >&2; exit 130; }
 
+header() {
+  clear 2>/dev/null || true
+  printf '\n%s  ┌──────────────────────────────────────────────┐\n' "$BL$BD"
+  printf '  │   PMON  ·  Patch- & Schwachstellenmonitor    │\n'
+  printf '  └──────────────────────────────────────────────┘%s\n' "$CL"
+  printf '  MB-IT Solutions · powered by yodaeichen\n\n'
+}
+
+# ------------------------------------------------------------- Dialoge
+# whiptail schreibt die Auswahl auf stderr → Kanäle tauschen
+wt() { whiptail --backtitle "$BACKTITLE" "$@" 3>&1 1>&2 2>&3; }
+
+input() {  # Titel Text Vorgabe
+  wt --title "$1" --inputbox "$2" 11 68 "$3" || cancelled
+}
+
+input_num() {  # Titel Text Vorgabe Min Max
+  local v
+  while true; do
+    v="$(input "$1" "$2" "$3")"
+    if [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -ge "$4" ] && [ "$v" -le "$5" ]; then printf '%s' "$v"; return; fi
+    wt --title "Ungültige Eingabe" --msgbox "Bitte eine Zahl zwischen $4 und $5 eingeben." 8 60 || true
+  done
+}
+
+yesno() {  # Titel Text [defaultno]
+  if [ "${3:-}" = "no" ]; then whiptail --backtitle "$BACKTITLE" --title "$1" --defaultno --yesno "$2" 11 68
+  else whiptail --backtitle "$BACKTITLE" --title "$1" --yesno "$2" 11 68; fi
+}
+
+valid_cidr() { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$ ]]; }
+valid_ip()   { [[ "$1" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; }
+
+# ------------------------------------------------------------- Erkennung
+storage_list() {  # Inhaltstyp → Zeilen „Name Typ FreiGB"
+  pvesm status -content "$1" 2>/dev/null | awk 'NR>1 && $3=="active" {printf "%s %s %.1f\n", $1, $2, $6/1024/1024}'
+}
+
+detect_defaults() {
+  CTID="${CTID:-$(pvesh get /cluster/nextid)}"
+  if [ -z "$STORAGE" ]; then
+    if storage_list rootdir | awk '{print $1}' | grep -qx local-lvm; then STORAGE=local-lvm
+    else STORAGE="$(storage_list rootdir | awk 'NR==1{print $1}')"; fi
+  fi
+  [ -n "$TEMPLATE_STORAGE" ] || TEMPLATE_STORAGE="$(storage_list vztmpl | awk 'NR==1{print $1}')"
+  if [ -z "$BRIDGE" ]; then
+    if ip -o link show vmbr0 >/dev/null 2>&1; then BRIDGE=vmbr0
+    else BRIDGE="$(ip -o link show type bridge 2>/dev/null | awk -F': ' 'NR==1{print $2}')"; fi
+  fi
+  [ -n "$STORAGE" ] || die "Kein aktiver Speicher für Container gefunden."
+  [ -n "$TEMPLATE_STORAGE" ] || die "Kein aktiver Speicher für Vorlagen (vztmpl) gefunden."
+  [ -n "$BRIDGE" ] || die "Keine Netzwerk-Bridge gefunden."
+}
+
+pick_storage() {  # Inhaltstyp Titel Vorgabe
+  local items=() name type free n=0
+  while read -r name type free; do
+    items+=("$name" "${type}, ${free} GB frei" "$([ "$name" = "$3" ] && echo ON || echo OFF)")
+    n=$((n + 1))
+  done < <(storage_list "$1")
+  [ "$n" -gt 0 ] || die "Kein Speicher für $1 gefunden."
+  if [ "$n" -eq 1 ]; then printf '%s' "${items[0]}"; return; fi
+  wt --title "$2" --radiolist "Mit Leertaste wählen, mit Enter bestätigen:" 16 68 "$n" "${items[@]}" || cancelled
+}
+
+pick_bridge() {
+  local items=() b n=0
+  while read -r b; do
+    [ -n "$b" ] || continue
+    items+=("$b" "$(ip -4 -o addr show "$b" 2>/dev/null | awk '{print $4}' | head -1)" "$([ "$b" = "$BRIDGE" ] && echo ON || echo OFF)")
+    n=$((n + 1))
+  done < <(ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1)
+  if [ "$n" -le 1 ]; then printf '%s' "$BRIDGE"; return; fi
+  wt --title "Netzwerk-Bridge" --radiolist "Über welche Bridge soll der Container angebunden werden?" 16 68 "$n" "${items[@]}" || cancelled
+}
+
+# ------------------------------------------------------------- Erweitert
+advanced_settings() {
+  local v
+  # Container-ID
+  while true; do
+    v="$(input_num "Container-ID" "ID des neuen Containers:" "$CTID" 100 999999999)"
+    if pct status "$v" >/dev/null 2>&1 || qm status "$v" >/dev/null 2>&1; then
+      wt --title "Belegt" --msgbox "ID $v ist bereits vergeben." 8 50 || true
+    else CTID="$v"; break; fi
+  done
+  # Hostname
+  while true; do
+    v="$(input "Hostname" "Hostname des Containers:" "$CT_HOSTNAME")"
+    if [[ "$v" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$ ]]; then CT_HOSTNAME="$v"; break; fi
+    wt --title "Ungültig" --msgbox "Nur Buchstaben, Ziffern und Bindestrich." 8 50 || true
+  done
+  # Debian
+  DEBIAN_VERSION="$(wt --title "Betriebssystem" --radiolist "Debian-Version des Containers:" 12 68 2 \
+    "13" "Debian 13 „Trixie“ (empfohlen)" "$([ "$DEBIAN_VERSION" = 13 ] && echo ON || echo OFF)" \
+    "12" "Debian 12 „Bookworm“" "$([ "$DEBIAN_VERSION" = 12 ] && echo ON || echo OFF)")" || cancelled
+  # Typ
+  UNPRIVILEGED="$(wt --title "Container-Typ" --radiolist "Art des Containers:" 12 68 2 \
+    "1" "Unprivilegiert (empfohlen)" "$([ "$UNPRIVILEGED" = 1 ] && echo ON || echo OFF)" \
+    "0" "Privilegiert" "$([ "$UNPRIVILEGED" = 0 ] && echo ON || echo OFF)")" || cancelled
+  # root-Passwort
+  while true; do
+    v="$(wt --title "root-Passwort" --passwordbox "Passwort für root im Container (leer = keins, Zugriff dann über „pct enter“):" 11 68)" || cancelled
+    [ -z "$v" ] && { CT_PASSWORD=""; break; }
+    if [ "${#v}" -lt 8 ]; then wt --title "Zu kurz" --msgbox "Mindestens 8 Zeichen." 8 40 || true; continue; fi
+    local v2
+    v2="$(wt --title "root-Passwort" --passwordbox "Passwort wiederholen:" 9 68)" || cancelled
+    [ "$v" = "$v2" ] && { CT_PASSWORD="$v"; break; }
+    wt --title "Abweichung" --msgbox "Die Passwörter stimmen nicht überein." 8 50 || true
+  done
+  # Ressourcen
+  CORES="$(input_num "CPU" "Anzahl CPU-Kerne:" "$CORES" 1 64)"
+  RAM="$(input_num "Arbeitsspeicher" "RAM in MB (empfohlen ab 1024):" "$RAM" 256 65536)"
+  SWAP="$(input_num "Swap" "Swap in MB:" "$SWAP" 0 65536)"
+  DISK="$(input_num "Festplatte" "Größe der Festplatte in GB (empfohlen ab 8):" "$DISK" 4 2048)"
+  STORAGE="$(pick_storage rootdir "Speicher für den Container" "$STORAGE")"
+  TEMPLATE_STORAGE="$(pick_storage vztmpl "Speicher für die Debian-Vorlage" "$TEMPLATE_STORAGE")"
+  # Netzwerk
+  BRIDGE="$(pick_bridge)"
+  local mode
+  mode="$(wt --title "IP-Adresse" --radiolist "Wie bekommt der Container seine Adresse?\n\nFür den Reverse Proxy ist eine feste IP empfehlenswert." 14 68 2 \
+    "static" "Feste IP-Adresse (empfohlen)" "$([ "$IP" != dhcp ] && echo ON || echo OFF)" \
+    "dhcp" "DHCP" "$([ "$IP" = dhcp ] && echo ON || echo OFF)")" || cancelled
+  if [ "$mode" = "dhcp" ]; then IP="dhcp"; GW=""
+  else
+    while true; do
+      v="$(input "Feste IP" "IP-Adresse mit Präfix (z. B. 172.15.15.60/24):" "$([ "$IP" = dhcp ] && echo "" || echo "$IP")")"
+      valid_cidr "$v" && { IP="$v"; break; }
+      wt --title "Ungültig" --msgbox "Format: 172.15.15.60/24" 8 50 || true
+    done
+    while true; do
+      v="$(input "Gateway" "Gateway (z. B. 172.15.15.1):" "${GW:-${IP%.*}.1}")"
+      valid_ip "$v" && { GW="$v"; break; }
+      wt --title "Ungültig" --msgbox "Bitte eine IPv4-Adresse eingeben." 8 50 || true
+    done
+  fi
+  while true; do
+    v="$(input "VLAN" "VLAN-Tag (leer = kein VLAN):" "$VLAN")"
+    if [ -z "$v" ] || { [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -ge 1 ] && [ "$v" -le 4094 ]; }; then VLAN="$v"; break; fi
+    wt --title "Ungültig" --msgbox "VLAN 1–4094 oder leer." 8 50 || true
+  done
+  while true; do
+    v="$(input "DNS-Server" "DNS-Server, z. B. dein Pi-hole (leer = wie Proxmox-Host):" "$DNS")"
+    if [ -z "$v" ] || valid_ip "$v"; then DNS="$v"; break; fi
+    wt --title "Ungültig" --msgbox "Bitte eine IPv4-Adresse oder leer." 8 50 || true
+  done
+  if yesno "Autostart" "Container beim Start des Proxmox-Hosts automatisch starten?"; then ONBOOT=1; else ONBOOT=0; fi
+  # Anwendung
+  DOMAIN="$(input "Domain" "Unter welcher Adresse wird pmon erreichbar sein?" "$DOMAIN")"
+  PORT="$(input_num "Port" "Interner Port der Anwendung:" "$PORT" 1024 65535)"
+  BRANCH="$(input "GitHub-Zweig" "Welcher Stand soll installiert werden?" "$BRANCH")"
+  RAW="https://raw.githubusercontent.com/${REPO}/${BRANCH}"
+  npm_settings
+}
+
+npm_settings() {
+  if yesno "Nginx Proxy Manager" "Proxy-Host ${DOMAIN} nach der Installation automatisch im Nginx Proxy Manager anlegen?\n\nEin passendes Zertifikat (z. B. *.mbit.solutions) wird automatisch zugewiesen." no; then
+    NPM_SETUP=yes
+    NPM_URL="$(input "NPM-Adresse" "Adresse der NPM-Verwaltung:" "${NPM_URL:-http://}")"
+    NPM_EMAIL="$(input "NPM-Benutzer" "E-Mail-Adresse des NPM-Benutzers:" "$NPM_EMAIL")"
+    NPM_PASSWORD="$(wt --title "NPM-Passwort" --passwordbox "Passwort (wird nicht gespeichert):" 9 68)" || cancelled
+    ACCESS_LIST="$(input "Zugriffsliste" "Name einer NPM-Zugriffsliste, z. B. „Nur intern“ (leer = keine):" "$ACCESS_LIST")"
+  else
+    NPM_SETUP=no
+  fi
+}
+
+summary_text() {
+  cat <<EOF
+Container-ID:   ${CTID}   Hostname: ${CT_HOSTNAME}
+System:         Debian ${DEBIAN_VERSION}, $([ "$UNPRIVILEGED" = 1 ] && echo unprivilegiert || echo privilegiert)
+Ressourcen:     ${CORES} Kerne, ${RAM} MB RAM, ${SWAP} MB Swap, ${DISK} GB
+Speicher:       ${STORAGE} (Vorlage: ${TEMPLATE_STORAGE})
+Netzwerk:       ${BRIDGE}${VLAN:+, VLAN ${VLAN}}, IP ${IP}${GW:+, GW ${GW}}${DNS:+, DNS ${DNS}}
+Autostart:      $([ "$ONBOOT" = 1 ] && echo ja || echo nein)
+Adresse:        https://${DOMAIN} → Port ${PORT}
+NPM einrichten: $([ "$NPM_SETUP" = yes ] && echo "ja (${NPM_URL})" || echo nein)
+Quelle:         github.com/${REPO} (${BRANCH})
+EOF
+}
+
+# ------------------------------------------------------------- Start
+header
 [ "$(id -u)" -eq 0 ] || die "Bitte als root auf dem Proxmox-Host ausführen."
 command -v pct >/dev/null && command -v pveam >/dev/null || die "Das ist kein Proxmox-VE-Host (pct/pveam fehlen)."
+[ "$(dpkg --print-architecture 2>/dev/null || echo amd64)" = "amd64" ] || die "Nur amd64 wird unterstützt."
+detect_defaults
 
-CTID="${CTID:-$(pvesh get /cluster/nextid)}"
-if pct status "$CTID" >/dev/null 2>&1; then die "Container $CTID existiert bereits – andere CTID wählen."; fi
+INTERACTIVE=0
+if [ "$MODE" != "auto" ] && [ -t 0 ] && [ -t 1 ] && command -v whiptail >/dev/null; then INTERACTIVE=1; fi
 
-if [ -z "$STORAGE" ]; then
-  if pvesm status -content rootdir 2>/dev/null | awk 'NR>1{print $1}' | grep -qx local-lvm; then STORAGE=local-lvm
-  else STORAGE="$(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && $3=="active"{print $1; exit}')"; fi
+if [ "$INTERACTIVE" = 1 ]; then
+  if [ -z "$MODE" ]; then
+    MODE="$(wt --title "$APP – Installation" --menu "Einstellungen für den neuen Container:" 14 68 3 \
+      "default"  "Standard  (ID ${CTID}, ${CORES} Kerne, ${RAM} MB, ${DISK} GB, DHCP)" \
+      "advanced" "Erweitert (alle Werte selbst festlegen)" \
+      "exit"     "Abbrechen")" || cancelled
+  fi
+  [ "$MODE" = "exit" ] && cancelled
+  if [ "$MODE" = "advanced" ]; then advanced_settings
+  else [ -n "$NPM_SETUP" ] || npm_settings; fi
+  yesno "$APP – Zusammenfassung" "$(summary_text)\n\nJetzt installieren?" || cancelled
+  header
+else
+  [ -n "$NPM_SETUP" ] || NPM_SETUP=no
+  if pct status "$CTID" >/dev/null 2>&1; then die "Container $CTID existiert bereits – CTID=… setzen."; fi
+  printf '%s\n\n' "$(summary_text)"
 fi
-[ -n "$STORAGE" ] || die "Kein Speicher für Container gefunden – STORAGE=… setzen."
-if [ -z "$TEMPLATE_STORAGE" ]; then
-  TEMPLATE_STORAGE="$(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 && $3=="active"{print $1; exit}')"
-fi
-[ -n "$TEMPLATE_STORAGE" ] || die "Kein Speicher für Vorlagen (vztmpl) gefunden – TEMPLATE_STORAGE=… setzen."
+if pct status "$CTID" >/dev/null 2>&1; then die "Container $CTID existiert bereits."; fi
+[ "$IP" = "dhcp" ] && msg_warn "IP per DHCP – für den Reverse Proxy besser eine DHCP-Reservierung einrichten."
 
-cat <<EOF
-
-  ${c_b}Patchmonitor – Installation als LXC${c_0}
-  ------------------------------------------------
-  Container-ID   ${CTID}  (Hostname ${CT_HOSTNAME})
-  Ressourcen     ${CORES} Kerne, ${RAM} MB RAM, ${DISK} GB auf ${STORAGE}
-  Netzwerk       ${BRIDGE}${VLAN:+, VLAN ${VLAN}}, IP ${IP}${GW:+, Gateway ${GW}}
-  Domain         https://${DOMAIN}  (über Nginx Proxy Manager)
-  Quelle         github.com/${REPO} (${BRANCH})
-
-EOF
-if [ "$IP" = "dhcp" ]; then
-  warn "IP per DHCP – für den Reverse Proxy besser eine feste IP (IP=…/24 GW=…) oder eine DHCP-Reservierung."
-fi
-a="$(ask "Fortfahren? [J/n] ")"
-case "${a,,}" in n|nein) die "Abgebrochen." ;; esac
-
-say "Debian-Vorlage suchen"
-pveam update >/dev/null 2>&1 || warn "pveam update fehlgeschlagen – nutze vorhandene Liste"
-TEMPLATE=""
-for v in 13 12; do
-  TEMPLATE="$(pveam available --section system 2>/dev/null | awk -v p="debian-${v}-standard" '$2 ~ "^"p {print $2}' | sort -V | tail -1)"
-  [ -n "$TEMPLATE" ] && break
-done
-[ -n "$TEMPLATE" ] || die "Keine Debian-Vorlage gefunden."
+# ------------------------------------------------------------- Vorlage
+msg_info "Suche Debian-${DEBIAN_VERSION}-Vorlage"
+pveam update >/dev/null 2>&1 || msg_warn "pveam update fehlgeschlagen – nutze vorhandene Liste"
+TEMPLATE="$(pveam available --section system 2>/dev/null | awk -v p="debian-${DEBIAN_VERSION}-standard" '$2 ~ "^"p {print $2}' | sort -V | tail -1)"
+[ -n "$TEMPLATE" ] || die "Keine Vorlage für Debian ${DEBIAN_VERSION} gefunden."
 if ! pveam list "$TEMPLATE_STORAGE" 2>/dev/null | grep -q "$TEMPLATE"; then
-  say "Lade $TEMPLATE"
-  pveam download "$TEMPLATE_STORAGE" "$TEMPLATE" >/dev/null
+  msg_info "Lade ${TEMPLATE}"
+  pveam download "$TEMPLATE_STORAGE" "$TEMPLATE" >/dev/null || die "Download der Vorlage fehlgeschlagen."
 fi
-ok "Vorlage $TEMPLATE"
+msg_ok "Vorlage ${TEMPLATE}"
 
+# ------------------------------------------------------------- Container
 NET="name=eth0,bridge=${BRIDGE},ip=${IP}"
 [ -n "$GW" ] && NET="${NET},gw=${GW}"
 [ -n "$VLAN" ] && NET="${NET},tag=${VLAN}"
-EXTRA=()
-[ -n "$DNS" ] && EXTRA+=(--nameserver "$DNS")
+OPTS=(--hostname "$CT_HOSTNAME" --cores "$CORES" --memory "$RAM" --swap "$SWAP"
+      --rootfs "${STORAGE}:${DISK}" --net0 "$NET" --unprivileged "$UNPRIVILEGED" --features nesting=1
+      --onboot "$ONBOOT" --ostype debian --tags pmon
+      --description "pmon – https://github.com/${REPO}")
+[ -n "$DNS" ] && OPTS+=(--nameserver "$DNS")
+[ -n "$CT_PASSWORD" ] && OPTS+=(--password "$CT_PASSWORD")
 
-say "Container $CTID anlegen"
-pct create "$CTID" "${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}" \
-  --hostname "$CT_HOSTNAME" --cores "$CORES" --memory "$RAM" --swap "$SWAP" \
-  --rootfs "${STORAGE}:${DISK}" --net0 "$NET" --unprivileged 1 --features nesting=1 \
-  --onboot 1 --ostype debian --tags "patchmonitor" \
-  --description "Patchmonitor – https://github.com/${REPO}" "${EXTRA[@]}" >/dev/null
+msg_info "Lege Container ${CTID} an"
+pct create "$CTID" "${TEMPLATE_STORAGE}:vztmpl/${TEMPLATE}" "${OPTS[@]}" >/dev/null || die "pct create fehlgeschlagen."
+msg_ok "Container ${CTID} angelegt"
 pct start "$CTID"
-ok "Container gestartet"
+msg_ok "Container gestartet"
 
-say "Warte auf Netzwerk"
+msg_info "Warte auf Netzwerk"
 for i in $(seq 1 40); do
   if pct exec "$CTID" -- getent hosts github.com >/dev/null 2>&1 </dev/null; then break; fi
-  [ "$i" -eq 40 ] && die "Container $CTID hat kein Netzwerk/DNS – Bridge, VLAN und Gateway prüfen."
+  [ "$i" -eq 40 ] && die "Container ${CTID} hat kein Netzwerk/DNS – Bridge, VLAN und Gateway prüfen."
   sleep 2
 done
-ok "Netzwerk bereit"
+msg_ok "Netzwerk bereit"
 
-say "Grundpakete installieren"
+msg_info "Installiere Grundpakete"
 pct exec "$CTID" -- bash -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null" </dev/null
+msg_ok "Grundpakete installiert"
 
-say "Patchmonitor installieren (dauert ein paar Minuten)"
+msg_info "Installiere ${APP} (dauert ein paar Minuten)"
 pct exec "$CTID" -- env REPO="$REPO" BRANCH="$BRANCH" DOMAIN="$DOMAIN" PORT="$PORT" \
-  bash -c "curl -fsSL '${RAW}/scripts/setup.sh' -o /root/patchmonitor-setup.sh && bash /root/patchmonitor-setup.sh" </dev/null
+  bash -c "curl -fsSL '${RAW}/scripts/setup.sh' -o /root/pmon-setup.sh && bash /root/pmon-setup.sh" </dev/null \
+  || die "Installation im Container fehlgeschlagen – Ausgabe oben prüfen."
+msg_ok "${APP} installiert"
 
 CT_IP="$(pct exec "$CTID" -- hostname -I </dev/null | awk '{print $1}')"
-ACCESS="$(pct exec "$CTID" -- cat /root/patchmonitor-zugang.txt </dev/null 2>/dev/null || true)"
+ACCESS="$(pct exec "$CTID" -- cat /root/pmon-zugang.txt </dev/null 2>/dev/null || true)"
 
-echo
-ok "Patchmonitor läuft in Container ${CTID}: ${c_g}http://${CT_IP}:${PORT}${c_0}"
-[ -n "$ACCESS" ] && printf '\n%s\n' "$ACCESS"
-
-# --- Optional: Nginx Proxy Manager gleich mit einrichten
-if [ "$NPM_SETUP" = "ask" ]; then
-  a="$(ask "Proxy-Host ${DOMAIN} im Nginx Proxy Manager jetzt anlegen? [j/N] ")"
-  case "${a,,}" in j|ja|y|yes) NPM_SETUP=yes ;; *) NPM_SETUP=no ;; esac
-fi
+# ------------------------------------------------------------- NPM
 if [ "$NPM_SETUP" = "yes" ]; then
-  TARGET_HOST="$CT_IP" TARGET_PORT="$PORT" DOMAIN="$DOMAIN" \
-    bash -c "$(curl -fsSL "${RAW}/scripts/npm-proxy.sh")" || warn "NPM-Einrichtung fehlgeschlagen – später erneut mit dem NPM-Einzeiler."
-else
-  cat <<EOF
-
-  Reverse Proxy später einrichten (auf einem Rechner, der NPM erreicht):
-    TARGET_HOST=${CT_IP} bash -c "\$(curl -fsSL ${RAW}/scripts/npm-proxy.sh)"
-EOF
+  msg_info "Richte Proxy-Host im Nginx Proxy Manager ein"
+  if NPM_URL="$NPM_URL" NPM_EMAIL="$NPM_EMAIL" NPM_PASSWORD="$NPM_PASSWORD" ACCESS_LIST="$ACCESS_LIST" \
+     TARGET_HOST="$CT_IP" TARGET_PORT="$PORT" DOMAIN="$DOMAIN" \
+     bash -c "$(curl -fsSL "${RAW}/scripts/npm-proxy.sh")" </dev/null; then
+    msg_ok "Proxy-Host ${DOMAIN} eingerichtet"
+  else
+    msg_warn "NPM-Einrichtung fehlgeschlagen – später mit dem NPM-Einzeiler wiederholen."
+  fi
 fi
 
+# ------------------------------------------------------------- Fertig
+echo
+msg_ok "${GN}${APP} läuft:${CL} http://${CT_IP}:${PORT}"
+[ "$NPM_SETUP" = "yes" ] && msg_ok "Über den Reverse Proxy: https://${DOMAIN}"
+[ -n "$ACCESS" ] && printf '\n%s\n' "$ACCESS" | sed 's/^/    /'
 cat <<EOF
 
-  ${c_b}Nächste Schritte${c_0}
+  ${BD}Nächste Schritte${CL}
   1. DNS: ${DOMAIN} auf die IP des Nginx Proxy Managers zeigen lassen (Pi-hole: Local DNS Records).
-  2. https://${DOMAIN} öffnen, mit admin anmelden, Passwort ändern.
-  3. Quellen → Neue Quelle → Action1 (API Credentials aus der Action1-Konsole).
-  4. Danach in Container ${CTID}: rm /root/patchmonitor-zugang.txt
+EOF
+if [ "$NPM_SETUP" != "yes" ]; then
+cat <<EOF
+     Proxy-Host anlegen:
+     TARGET_HOST=${CT_IP} bash -c "\$(curl -fsSL ${RAW}/scripts/npm-proxy.sh)"
+EOF
+fi
+cat <<EOF
+  2. Anmelden, Passwort ändern, unter Quellen Action1 einrichten.
+  3. Zugangsdatei löschen:  pct exec ${CTID} -- rm /root/pmon-zugang.txt
 
-  Aktualisieren:  pct exec ${CTID} -- patchmonitor-update
-  Protokoll:      pct exec ${CTID} -- journalctl -u patchmonitor -f
+  Aktualisieren:  pct exec ${CTID} -- pmon-update
+  Protokoll:      pct exec ${CTID} -- journalctl -u pmon -f
 
 EOF

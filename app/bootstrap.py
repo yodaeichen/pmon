@@ -22,10 +22,10 @@ def ensure_admin() -> str | None:
     target = os.environ.get("ADMIN_PASSWORD_FILE")
     if target:
         p = Path(target)
-        p.write_text(f"Patchmonitor – erster Zugang\nBenutzer: admin\nPasswort: {pw}\n"
+        p.write_text(f"pmon – erster Zugang\nBenutzer: admin\nPasswort: {pw}\n"
                      "Bitte nach der ersten Anmeldung ändern und diese Datei löschen.\n")
         p.chmod(0o600)
-    print(f"[patchmonitor] Admin-Benutzer angelegt: admin / {pw}", flush=True)
+    print(f"[pmon] Admin-Benutzer angelegt: admin / {pw}", flush=True)
     return pw
 
 

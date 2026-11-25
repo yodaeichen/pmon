@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Patchmonitor – Installation/Aktualisierung auf Debian 12/13 oder Ubuntu 22.04+
+# pmon – Installation/Aktualisierung auf Debian 12/13 oder Ubuntu 22.04+
 # Läuft im LXC (vom Proxmox-Einzeiler aufgerufen) oder direkt auf einer VM.
 # Mehrfach ausführbar: aktualisiert Code und Abhängigkeiten, Daten bleiben erhalten.
 set -euo pipefail
 
-REPO="${REPO:-yodaeichen/patchmonitor}"
+REPO="${REPO:-yodaeichen/pmon}"
 BRANCH="${BRANCH:-main}"
 REPO_URL="${REPO_URL:-https://github.com/${REPO}.git}"
-APP_DIR="${APP_DIR:-/opt/patchmonitor}"
-DATA_DIR="${DATA_DIR:-/var/lib/patchmonitor}"
-ENV_FILE="${ENV_FILE:-/etc/patchmonitor.env}"
+APP_DIR="${APP_DIR:-/opt/pmon}"
+DATA_DIR="${DATA_DIR:-/var/lib/pmon}"
+ENV_FILE="${ENV_FILE:-/etc/pmon.env}"
 DOMAIN="${DOMAIN:-pmon.mbit.solutions}"
 PORT="${PORT:-8000}"
-SVC_USER="patchmonitor"
-ACCESS_FILE="/root/patchmonitor-zugang.txt"
+SVC_USER="pmon"
+ACCESS_FILE="/root/pmon-zugang.txt"
 
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -52,7 +52,7 @@ if [ ! -f "$ENV_FILE" ]; then
   FERNET_KEY="$("$APP_DIR/.venv/bin/python" -c 'from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())')"
   umask 027
   cat > "$ENV_FILE" <<EOF
-# Patchmonitor – Konfiguration. Schlüssel NICHT verlieren: FERNET_KEY entschlüsselt
+# pmon – Konfiguration. Schlüssel NICHT verlieren: FERNET_KEY entschlüsselt
 # die gespeicherten Zugangsdaten (API-Secrets, SSH-Passwörter).
 SECRET_KEY=${SECRET_KEY}
 FERNET_KEY=${FERNET_KEY}
@@ -78,9 +78,9 @@ say "Datenbank vorbereiten"
 chown -R "$SVC_USER:$SVC_USER" "$DATA_DIR"
 
 say "Dienst einrichten"
-cat > /etc/systemd/system/patchmonitor.service <<EOF
+cat > /etc/systemd/system/pmon.service <<EOF
 [Unit]
-Description=Patchmonitor – Schwachstellen-Dashboard
+Description=pmon – Schwachstellen-Dashboard
 After=network-online.target
 Wants=network-online.target
 
@@ -102,22 +102,22 @@ ReadWritePaths=${DATA_DIR}
 WantedBy=multi-user.target
 EOF
 
-cat > /usr/local/bin/patchmonitor-update <<EOF
+cat > /usr/local/bin/pmon-update <<EOF
 #!/usr/bin/env bash
-# Patchmonitor auf den neuesten Stand von GitHub bringen
+# pmon auf den neuesten Stand von GitHub bringen
 set -euo pipefail
 set -a; . ${ENV_FILE}; set +a
 export REPO BRANCH
 exec bash ${APP_DIR}/scripts/setup.sh "\$@"
 EOF
-chmod 755 /usr/local/bin/patchmonitor-update
+chmod 755 /usr/local/bin/pmon-update
 
 if ! command -v systemctl >/dev/null || [ ! -d /run/systemd/system ]; then
   die "Kein systemd gefunden: Programm installiert, aber kein Dienst eingerichtet."
 fi
 systemctl daemon-reload
-systemctl enable -q patchmonitor
-systemctl restart patchmonitor
+systemctl enable -q pmon
+systemctl restart pmon
 
 say "Warte auf den Start"
 ok=""
@@ -125,12 +125,12 @@ for _ in $(seq 1 30); do
   if curl -fs "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then ok=1; break; fi
   sleep 1
 done
-[ -n "$ok" ] || die "Patchmonitor antwortet nicht – siehe: journalctl -u patchmonitor -n 50"
+[ -n "$ok" ] || die "pmon antwortet nicht – siehe: journalctl -u pmon -n 50"
 
 VERSION="$(curl -fs "http://127.0.0.1:${PORT}/healthz" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
-say "Patchmonitor ${VERSION} läuft: http://${IP}:${PORT}  (später: https://${DOMAIN})"
+say "pmon ${VERSION} läuft: http://${IP}:${PORT}  (später: https://${DOMAIN})"
 if [ -f "$ACCESS_FILE" ]; then
   echo "    Erster Zugang steht in ${ACCESS_FILE} – nach der ersten Anmeldung Passwort ändern und Datei löschen."
 fi
