@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon, prio, kev, cvss, epss, kind_icon with context %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{{ kind_icon(d.kind) }} {{ kinds.get(d.kind, "Gerät") }}</span>
+    <h1>{{ d.name }}</h1>
+    <p>{{ d.tenant.name if d.tenant }}{% if d.source %} · Quelle <a href="/quellen/{{ d.source.id }}">{{ d.source.name }}</a>{% endif %}</p>
+  </div>
+  {% if vendor %}<a class="btn btn-outline" href="{{ vendor[1] }}" target="_blank" rel="noopener">{{ icon("external-link") }} {{ vendor[0] }}</a>{% endif %}
+</div>
+<div class="grid two">
+  <div class="card">
+    <h3>Systemdaten</h3>
+    <dl class="facts">
+      <dt>Betriebssystem</dt><dd>{{ d.os or "–" }}</dd>
+      <dt>Version</dt><dd class="mono">{{ d.os_version or "–" }}</dd>
+      {% if d.model %}<dt>Modell</dt><dd>{{ d.model }}</dd>{% endif %}
+      {% if d.address %}<dt>Adresse</dt><dd class="mono">{{ d.address }}</dd>{% endif %}
+      {% if d.online is not none %}<dt>Status</dt><dd><span class="dot {{ 'on' if d.online else 'off' }}"></span>{{ "online" if d.online else "offline" }}</dd>{% endif %}
+      <dt>Zuletzt gesehen</dt><dd>{{ fmt_dt(d.last_seen) }}</dd>
+      <dt>Letzter Scan</dt><dd>{{ fmt_dt(d.last_scan) }}</dd>
+    </dl>
+  </div>
+  <div class="card">
+    <h3>Zusammenfassung</h3>
+    {% if open %}
+      <p><b>{{ open|length }}</b> offene Schwachstelle(n), davon
+      <b>{{ open|selectattr("cve.kev")|list|length }}</b> aktiv ausgenutzt.</p>
+      <p class="muted small">Die wichtigste zuerst: <a href="/schwachstellen/{{ open[0].cve_id }}">{{ open[0].cve_id }}</a> ({{ open[0].product }}).</p>
+    {% else %}<p>{{ icon("shield-check") }} Keine offenen Schwachstellen bekannt.</p>{% endif %}
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title"><h2>Offene Schwachstellen</h2></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Priorität</th><th>CVE</th><th>Produkt</th><th>Installiert</th><th>Behoben in / Update</th><th>CVSS</th></tr></thead>
+    <tbody>
+    {% for f in open %}
+      <tr><td>{{ prio(f.cve) }}</td>
+        <td class="nowrap"><a href="/schwachstellen/{{ f.cve_id }}"><b>{{ f.cve_id }}</b></a><div>{{ kev(f.cve) }}</div></td>
+        <td>{{ f.product or "–" }}</td><td class="mono small">{{ f.installed_version or "–" }}</td>
+        <td class="small">{{ f.fixed_version or "–" }}</td><td class="nowrap">{{ cvss(f.cve) }}</td></tr>
+    {% else %}<tr><td colspan="6" class="empty">Keine.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+{% if other %}
+<div class="section">
+  <details><summary>Behobene und akzeptierte Funde ({{ other|length }})</summary>
+  <div class="table-wrap" style="margin-top:10px"><table>
+    <thead><tr><th>CVE</th><th>Produkt</th><th>Status</th><th>Zuletzt gesehen</th></tr></thead>
+    <tbody>{% for f in other %}<tr><td><a href="/schwachstellen/{{ f.cve_id }}">{{ f.cve_id }}</a></td><td>{{ f.product }}</td>
+      <td>{% if f.status == "accepted" %}<span class="badge b-blue">akzeptiert</span>{% else %}<span class="badge b-ok">behoben {{ fmt_dt(f.resolved_at, "%d.%m.%Y") }}</span>{% endif %}</td>
+      <td class="small">{{ fmt_dt(f.last_seen) }}</td></tr>{% endfor %}</tbody>
+  </table></div></details>
+</div>
+{% endif %}
+
+<div class="section">
+  <div class="section-title"><h2>Installierte Software</h2><span class="muted small">{{ sw_total }} Einträge</span></div>
+  <form class="filters" method="get"><div class="field"><input type="search" name="sw" value="{{ sw }}" placeholder="Software suchen"></div><button class="btn btn-outline">{{ icon("search") }} Suchen</button></form>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Name</th><th>Version</th><th class="hide-sm">Hersteller</th></tr></thead>
+    <tbody>{% for s in software %}<tr><td>{{ s.name }}</td><td class="mono small">{{ s.version }}</td><td class="hide-sm small">{{ s.vendor }}</td></tr>
+    {% else %}<tr><td colspan="3" class="empty">Kein Software-Inventar vorhanden.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endblock %}

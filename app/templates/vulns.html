@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon, prio, kev, cvss, epss with context %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{{ icon("bug") }} Schwachstellen</span>
+    <h1>Offene Schwachstellen</h1>
+    <p>{{ total }} CVE(s) – sortiert nach Priorität. Ein Klick zeigt Erklärung, betroffene Geräte und Abhilfe.</p>
+  </div>
+  <a class="btn btn-outline" href="/export/schwachstellen.csv{{ '?kunde=' ~ f.kunde if f.kunde }}">{{ icon("download") }} CSV-Export</a>
+</div>
+
+<form class="filters" method="get">
+  <div class="field"><label>Kunde</label><select name="kunde"><option value="">Alle</option>
+    {% for t in tenants %}<option value="{{ t.id }}" {{ 'selected' if f.kunde == t.id }}>{{ t.name }}</option>{% endfor %}</select></div>
+  <div class="field"><label>Priorität</label><select name="prio"><option value="">Alle</option>
+    {% for k, p in PRIORITIES.items() %}<option value="{{ k }}" {{ 'selected' if f.prio == k }}>{{ p.label }}</option>{% endfor %}</select></div>
+  <div class="field"><label>Herkunft</label><select name="quelle"><option value="">Alle</option>
+    <option value="action1" {{ 'selected' if f.quelle == 'action1' }}>Action1</option>
+    <option value="nvd" {{ 'selected' if f.quelle == 'nvd' }}>NAS (NVD)</option>
+    <option value="osv" {{ 'selected' if f.quelle == 'osv' }}>Linux (OSV)</option></select></div>
+  <div class="field"><label class="check"><input type="checkbox" name="kev" value="1" {{ 'checked' if f.kev }}> nur aktiv ausgenutzte</label></div>
+  <div class="field"><label>Suche</label><input type="search" name="q" value="{{ f.q }}" placeholder="CVE, Produkt, Text"></div>
+  <button class="btn btn-outline">{{ icon("search") }} Filtern</button>
+</form>
+
+<div class="table-wrap"><table>
+  <thead><tr><th>Priorität</th><th>CVE</th><th>Produkt</th><th>Geräte</th><th>CVSS</th><th class="hide-sm">EPSS</th><th class="hide-sm">Abhilfe</th></tr></thead>
+  <tbody>
+  {% for g in rows %}
+    <tr>
+      <td>{{ prio(g.cve) }}</td>
+      <td class="nowrap"><a href="/schwachstellen/{{ g.cve.id }}"><b>{{ g.cve.id }}</b></a><div>{{ kev(g.cve) }}</div></td>
+      <td>{{ (g.products|sort|join(", "))[:90] or "–" }}
+        <div class="sub">{{ g.tenants|lookup(tenant_names)|join(", ") }}</div>
+        {% if g.cve.description %}<div class="sub">{{ g.cve.description[:160] }}{{ "…" if g.cve.description|length > 160 }}</div>{% endif %}</td>
+      <td>{{ g.devices|length }}</td>
+      <td class="nowrap">{{ cvss(g.cve) }}</td>
+      <td class="hide-sm">{{ epss(g.cve) }}</td>
+      <td class="hide-sm small">{{ (g.fixes|sort|join("; "))[:90] or "Update einspielen" }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="empty">{{ icon("shield-check") }} Keine passenden offenen Schwachstellen.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% if total > rows|length %}<p class="muted small">Es werden die ersten {{ rows|length }} von {{ total }} angezeigt – Filter nutzen oder CSV exportieren.</p>{% endif %}
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon, csrf_field with context %}
+{% macro secret(name, label, hint="") %}
+<div class="field"><label>{{ label }} {% if name in sec %}<span class="secret-set">{{ icon("key-round") }} gespeichert</span>{% endif %}</label>
+  <input type="password" name="{{ name }}" autocomplete="new-password" placeholder="{{ 'Leer lassen = unverändert' if name in sec else '' }}">
+  {% if hint %}<div class="hint">{{ hint|safe }}</div>{% endif %}
+  {% if name in sec %}<label class="check small" style="margin-top:6px"><input type="checkbox" name="clear_{{ name }}"> entfernen</label>{% endif %}</div>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">{{ icon("settings") }} Einstellungen</span><h1>Einstellungen</h1>
+  <p>Benachrichtigungen, Datenquellen für die Anreicherung und Anzeige.</p></div></div>
+<form method="post" action="/einstellungen">{{ csrf_field() }}
+  <div class="card">
+    <h3>{{ icon("shield-alert") }} Benachrichtigung</h3>
+    <label class="check"><input type="checkbox" name="notify_enabled" {{ 'checked' if s.notify_enabled }}> Bei neuen Funden benachrichtigen</label>
+    <div class="form-grid" style="margin-top:12px">
+      <div class="field"><label>Ab Priorität</label><select name="notify_min_priority">
+        <option value="sofort" {{ 'selected' if s.notify_min_priority == 'sofort' }}>Nur „Sofort“</option>
+        <option value="hoch" {{ 'selected' if s.notify_min_priority == 'hoch' }}>„Sofort“ und „Hoch“</option></select></div>
+    </div>
+    <h4 class="section">E-Mail (SMTP)</h4>
+    <div class="form-grid">
+      <div class="field"><label>SMTP-Server</label><input type="text" name="smtp_host" value="{{ s.smtp_host }}" placeholder="mail.mbit.solutions"></div>
+      <div class="field"><label>Port</label><input type="number" name="smtp_port" value="{{ s.smtp_port }}"></div>
+      <div class="field"><label>Benutzer</label><input type="text" name="smtp_user" value="{{ s.smtp_user }}" autocomplete="off"></div>
+      {{ secret("smtp_password", "Passwort") }}
+      <div class="field"><label>Absender</label><input type="email" name="smtp_from" value="{{ s.smtp_from }}" placeholder="noreply@mbit.solutions"></div>
+      <div class="field"><label>Empfänger</label><input type="text" name="smtp_to" value="{{ s.smtp_to }}" placeholder="info@mbit.solutions"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="smtp_starttls" {{ 'checked' if s.smtp_starttls }}> STARTTLS (Port 587); Port 465 nutzt automatisch SSL</label>
+    <h4 class="section">Webhook</h4>
+    <div class="form-grid">
+      <div class="field"><label>URL</label><input type="url" name="webhook_url" value="{{ s.webhook_url }}" placeholder="z. B. Webhook-Quelle im DIVERA Gateway, Teams, n8n"></div>
+      {{ secret("webhook_secret", "Geheimnis (optional)", "wird als Header <code>X-Patchmonitor-Secret</code> mitgeschickt") }}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>{{ icon("bug") }} Schwachstellen-Datenbanken</h3>
+    <p class="small muted">CISA KEV, FIRST EPSS und OSV.dev brauchen keinen Schlüssel. Die NVD erlaubt ohne Schlüssel nur 5 Anfragen pro 30 Sekunden – ein kostenloser Schlüssel macht die Abfragen zehnmal schneller.</p>
+    <div class="form-grid">
+      {{ secret("nvd_api_key", "NVD-API-Schlüssel", "kostenlos unter <a href=\"https://nvd.nist.gov/developers/request-an-api-key\" target=\"_blank\" rel=\"noopener\">nvd.nist.gov</a>") }}
+      <div class="field"><label>Action1-Konsole</label><input type="url" name="action1_console_url" value="{{ s.action1_console_url }}"><div class="hint">für den Link „Action1-Konsole öffnen“</div></div>
+      <div class="field"><label>Gerät gilt als veraltet nach (Tagen)</label><input type="number" name="stale_days" min="1" value="{{ s.stale_days }}"></div>
+    </div>
+  </div>
+  <div class="btns section"><button class="btn btn-primary">Speichern</button></div>
+</form>
+
+<div class="card section">
+  <h3>Tests</h3>
+  <div class="btns">
+    <form method="post" action="/einstellungen/test">{{ csrf_field() }}<input type="hidden" name="what" value="mail"><button class="btn btn-outline">Testmail senden</button></form>
+    <form method="post" action="/einstellungen/test">{{ csrf_field() }}<input type="hidden" name="what" value="webhook"><button class="btn btn-outline">Webhook testen</button></form>
+    <form method="post" action="/einstellungen/test">{{ csrf_field() }}<input type="hidden" name="what" value="feeds"><button class="btn btn-outline">{{ icon("refresh-cw") }} KEV/EPSS/NVD jetzt aktualisieren</button></form>
+  </div>
+</div>
+{% endblock %}

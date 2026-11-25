@@ -1,0 +1,45 @@
+{% from "_m.html" import icon, csrf_field with context %}<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title ~ " · " if title }}Patchmonitor</title>
+<link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css?v={{ version }}">
+<meta name="robots" content="noindex,nofollow">
+</head>
+<body>
+{% if user %}
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/static/img/logo.svg" alt=""><span><b>Patchmonitor</b><small>MB-IT Solutions</small></span></a>
+    <nav class="nav">
+      {% macro nav(href, label) %}<a href="{{ href }}" class="{{ 'active' if (path == href or (href != '/' and path.startswith(href))) }}">{{ label }}</a>{% endmacro %}
+      {{ nav("/", "Übersicht") }}{{ nav("/schwachstellen", "Schwachstellen") }}{{ nav("/geraete", "Geräte") }}
+      {% if user.can_manage %}<span class="sep"></span>{{ nav("/kunden", "Kunden") }}{{ nav("/quellen", "Quellen") }}{{ nav("/protokoll", "Protokoll") }}{% endif %}
+      {% if user.is_admin %}<span class="sep"></span>{{ nav("/einstellungen", "Einstellungen") }}{{ nav("/benutzer", "Benutzer") }}{% endif %}
+    </nav>
+    <div class="userbox">
+      <a href="/konto" class="hide-sm" title="Mein Konto">{{ icon("user") }} {{ user.display_name or user.username }}</a>
+      <form method="post" action="/logout">{{ csrf_field() }}<button class="iconbtn" title="Abmelden">{{ icon("log-out") }}</button></form>
+    </div>
+  </div>
+</header>
+{% endif %}
+{% block body %}
+<main><div class="wrap">
+  {% if flash %}<div class="flash {{ flash.kind }}">{{ flash.msg }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</div></main>
+{% endblock %}
+<footer class="site-footer">
+  <div class="wrap">
+    <span>Patchmonitor v{{ version }} · ein Projekt von <a href="https://www.mbit.solutions" rel="noopener" target="_blank">MB-IT Solutions</a></span>
+    <span class="muted">powered by <a href="https://github.com/yodaeichen" rel="noopener" target="_blank">yodaeichen</a> ·
+      <a href="https://github.com/{{ repo }}" rel="noopener" target="_blank">GitHub</a> ·
+      <a href="https://github.com/sponsors/yodaeichen" rel="noopener" target="_blank">Unterstützen ♥</a></span>
+  </div>
+</footer>
+<script src="/static/app.js?v={{ version }}"></script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon, prio, kev, cvss, epss, kind_icon, csrf_field with context %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{{ icon("bug") }} Schwachstelle</span>
+    <h1>{{ cve.id }}</h1>
+    <div class="btns">{{ prio(cve) }} {{ kev(cve) }}
+      {% if cve.cwe %}<span class="badge">{{ cve.cwe }}</span>{% endif %}
+      {% if cve.published %}<span class="small muted">veröffentlicht {{ fmt_dt(cve.published, "%d.%m.%Y") }}</span>{% endif %}</div>
+  </div>
+  <div class="btns">
+    <a class="btn btn-outline" href="https://nvd.nist.gov/vuln/detail/{{ cve.id }}" target="_blank" rel="noopener">{{ icon("external-link") }} NVD</a>
+    {% if cve.kev %}<a class="btn btn-outline" href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog?search_api_fulltext={{ cve.id }}" target="_blank" rel="noopener">{{ icon("external-link") }} CISA</a>{% endif %}
+  </div>
+</div>
+
+<div class="grid two">
+  <div class="card">
+    <h3>Worum geht es?</h3>
+    {% if cve.kev_name %}<p><b>{{ cve.kev_name }}</b></p>{% endif %}
+    <p>{{ cve.description or "Für diese Schwachstelle liegt noch keine Beschreibung vor – sie wird beim nächsten Abgleich mit der NVD nachgeladen." }}</p>
+    {% if cve.description %}<p class="small muted">Originaltext der NVD (englisch).</p>{% endif %}
+    <dl class="facts">
+      <dt>CVSS</dt><dd>{{ cvss(cve) }}{% if cve.vector %} <span class="sub mono">{{ cve.vector }}</span>{% endif %}</dd>
+      <dt>EPSS</dt><dd>{{ epss(cve) }}{% if cve.epss_percentile is not none %} <span class="sub">(höher als {{ "%.0f"|format(cve.epss_percentile * 100) }} % aller CVEs)</span>{% endif %}</dd>
+      <dt>Aktiv ausgenutzt</dt><dd>{% if cve.kev %}Ja – seit {{ cve.kev_date_added }} in der CISA-KEV-Liste{% if cve.kev_ransomware == "Known" %}, bekannt aus Ransomware-Kampagnen{% endif %}{% else %}Nicht in der CISA-KEV-Liste{% endif %}</dd>
+    </dl>
+  </div>
+  <div class="card">
+    <h3>{{ icon("list-checks") }} Abhilfe</h3>
+    {% if cve.kev %}<div class="callout red" style="margin-bottom:14px"><b>Priorität „Sofort“:</b> Diese Lücke wird bereits für Angriffe genutzt.</div>{% endif %}
+    {% if main_steps %}<ol class="steps">{% for s in main_steps %}<li>{{ s }}</li>{% endfor %}</ol>
+    {% else %}<p class="muted">Kein offener Fund mehr – nichts zu tun.</p>{% endif %}
+    <p class="small muted" style="margin-top:12px">Die Schritte je Gerät stehen unten bei den betroffenen Systemen.</p>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title"><h2>Betroffene Geräte</h2><span class="muted small">{{ items|selectattr("f.status", "equalto", "open")|list|length }} offen</span></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Gerät</th><th>Produkt</th><th>Installiert</th><th>Behoben in / Update</th><th>Status</th><th class="hide-sm">Seit</th></tr></thead>
+    <tbody>
+    {% for i in items %}
+      <tr>
+        <td><a href="/geraete/{{ i.d.id }}">{{ kind_icon(i.d.kind) }} <b>{{ i.d.name }}</b></a>
+          <div class="sub">{{ i.d.tenant.name if i.d.tenant }} · {{ kinds.get(i.d.kind, i.d.os) }}</div></td>
+        <td>{{ i.f.product or "–" }}<div class="sub">via {{ {"action1": "Action1", "nvd": "NVD", "osv": "OSV"}.get(i.f.origin, i.f.origin) }}{% if i.f.vendor_status %} · {{ i.f.vendor_status }}{% endif %}</div></td>
+        <td class="mono small">{{ i.f.installed_version or "–" }}</td>
+        <td class="small">{{ i.f.fixed_version or "–" }}</td>
+        <td>{% if i.f.status == "open" %}<span class="badge p-hoch">offen</span>{% elif i.f.status == "accepted" %}<span class="badge b-blue" title="{{ i.f.note }}">akzeptiert</span>{% else %}<span class="badge b-ok">behoben</span>{% endif %}</td>
+        <td class="hide-sm small">{{ fmt_dt(i.f.first_seen, "%d.%m.%Y") }}</td>
+      </tr>
+      {% if i.f.status != "resolved" %}
+      <tr><td colspan="6" style="background:var(--bg)">
+        <details><summary>Abhilfe für {{ i.d.name }}</summary>
+          <ol class="steps" style="margin-top:8px">{% for s in i.steps %}<li>{{ s }}</li>{% endfor %}</ol>
+          <div class="btns small">
+            {% if i.f.origin == "action1" and console %}<a href="{{ console }}" target="_blank" rel="noopener">{{ icon("external-link") }} Action1-Konsole öffnen</a>{% endif %}
+            {% if i.vendor %}<a href="{{ i.vendor[1] }}" target="_blank" rel="noopener">{{ icon("external-link") }} {{ i.vendor[0] }}</a>{% endif %}
+          </div>
+          {% if user.can_manage %}
+          <form method="post" action="/funde/{{ i.f.id }}/status" class="btns" style="margin-top:10px">{{ csrf_field() }}
+            {% if i.f.status == "open" %}
+              <input type="hidden" name="status" value="accepted">
+              <input type="text" name="note" placeholder="Begründung (z. B. Kompensation, kein Internetzugriff)" style="max-width:420px">
+              <button class="btn btn-outline btn-sm">Risiko akzeptieren</button>
+            {% else %}
+              <span class="small muted">Begründung: {{ i.f.note or "–" }}</span>
+              <input type="hidden" name="status" value="open"><button class="btn btn-outline btn-sm">Wieder öffnen</button>
+            {% endif %}
+          </form>
+          {% endif %}
+        </details>
+      </td></tr>
+      {% endif %}
+    {% else %}
+      <tr><td colspan="6" class="empty">Keine Geräte (mehr) betroffen.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+{% if refs %}
+<div class="section card">
+  <h3>Weitere Informationen</h3>
+  <ul class="small">
+  {% for r in refs[:15] %}<li><a href="{{ r.url }}" target="_blank" rel="noopener noreferrer">{{ r.url[:110] }}</a>{% if r.tags %} <span class="muted">({{ r.tags|join(", ") }})</span>{% endif %}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

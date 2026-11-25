@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon, csrf_field with context %}
+{% macro secret(name, label, hint="", textarea=false) %}
+<div class="field"><label>{{ label }} {% if name in sec_keys %}<span class="secret-set">{{ icon("key-round") }} gespeichert</span>{% endif %}</label>
+  {% if textarea %}<textarea name="{{ name }}" placeholder="{{ 'Leer lassen = unverändert' if name in sec_keys else '' }}" autocomplete="off"></textarea>
+  {% else %}<input type="password" name="{{ name }}" autocomplete="new-password" placeholder="{{ 'Leer lassen = unverändert' if name in sec_keys else '' }}">{% endif %}
+  {% if hint %}<div class="hint">{{ hint }}</div>{% endif %}
+  {% if name in sec_keys %}<label class="check small" style="margin-top:6px"><input type="checkbox" name="clear_{{ name }}"> entfernen</label>{% endif %}
+</div>
+{% endmacro %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{{ icon("plug") }} {{ kinds[kind].label }}</span>
+    <h1>{{ src.name if src else "Neue Quelle: " ~ kinds[kind].label }}</h1>
+    <p>{{ kinds[kind].hint }}. Zugangsdaten werden verschlüsselt gespeichert.</p>
+  </div>
+  {% if src %}
+  <div class="btns">
+    <form method="post" action="/quellen/{{ src.id }}/test" class="inline">{{ csrf_field() }}<button class="btn btn-outline">{{ icon("plug") }} Verbindung testen</button></form>
+    <form method="post" action="/quellen/{{ src.id }}/scan" class="inline">{{ csrf_field() }}<button class="btn btn-primary">{{ icon("refresh-cw") }} Jetzt scannen</button></form>
+  </div>
+  {% endif %}
+</div>
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+{% if src and src.last_status %}<div class="flash {{ 'ok' if src.last_status == 'ok' else 'err' }}">Letzter Lauf {{ fmt_dt(src.last_run) }}: {{ src.last_message }}</div>{% endif %}
+
+<form method="post" action="/quellen/speichern" class="card">
+  {{ csrf_field() }}<input type="hidden" name="kind" value="{{ kind }}">{% if src %}<input type="hidden" name="sid" value="{{ src.id }}">{% endif %}
+  <div class="form-grid">
+    <div class="field"><label>Name</label><input type="text" name="name" value="{{ src.name if src else kinds[kind].label }}" required></div>
+    <div class="field"><label>Kunde</label>
+      <select name="tenant_id">
+        <option value="">{{ "Automatisch je Action1-Organisation" if kind == "action1" else "– bitte wählen –" }}</option>
+        {% for t in tenants %}<option value="{{ t.id }}" {{ 'selected' if src and src.tenant_id == t.id }}>{{ t.name }}</option>{% endfor %}
+      </select>
+      <div class="hint">{% if kind == "action1" %}Leer lassen, wenn deine Action1-Organisationen deine Kunden sind.{% else %}Neue Kunden legst du unter <a href="/kunden">Kunden</a> an.{% endif %}</div></div>
+    <div class="field"><label>Intervall (Minuten)</label><input type="number" name="interval_minutes" min="15" max="10080" value="{{ src.interval_minutes if src else (60 if kind == 'action1' else 360) }}"></div>
+    <div class="field"><label>&nbsp;</label><label class="check"><input type="checkbox" name="enabled" {{ 'checked' if not src or src.enabled }}> automatisch scannen</label></div>
+  </div>
+
+  {% if kind == "action1" %}
+    <h3 class="section">Action1-API</h3>
+    <div class="callout small" style="margin-bottom:16px">In Action1 unter <b>API Credentials</b> ein Paar aus Client-ID und Secret anlegen – am besten über einen eigenen Benutzer mit möglichst wenigen Rechten (nur lesen).</div>
+    <div class="form-grid">
+      <div class="field"><label>Region</label><select name="region">
+        {% for k, r in regions.items() %}<option value="{{ k }}" {{ 'selected' if cfg.region == k }}>{{ r[0] }} – {{ r[1].split('/')[2] }}</option>{% endfor %}</select></div>
+      {{ secret("client_id", "Client-ID") }}
+      {{ secret("client_secret", "Client-Secret") }}
+      <div class="field"><label>Nur diese Organisations-IDs (optional)</label><input type="text" name="org_ids" value="{{ cfg.org_ids or '' }}" placeholder="kommagetrennt, leer = alle"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="only_open" {{ 'checked' if cfg.only_open }}> Schwachstellen mit dokumentierter Kompensation (Control applied) ausblenden</label>
+    <label class="check"><input type="checkbox" name="inventory" {{ 'checked' if cfg.inventory }}> Software-Inventar je Gerät abrufen (mehr API-Aufrufe)</label>
+    <details style="margin-top:14px"><summary>Eigene API-Adresse</summary>
+      <div class="field" style="margin-top:10px"><input type="url" name="base_url" value="{{ cfg.base_url or '' }}" placeholder="https://app.eu.action1.com/api/3.0"></div></details>
+  {% else %}
+    <h3 class="section">SSH-Zugang</h3>
+    <div class="callout small" style="margin-bottom:16px">
+      {% if kind == "synology" %}Auf dem NAS unter <b>Systemsteuerung → Terminal &amp; SNMP</b> SSH aktivieren. Synology erlaubt SSH nur für Mitglieder der Gruppe „administrators“ – dafür einen eigenen Benutzer anlegen, nicht „admin“ verwenden.
+      {% elif kind == "qnap" %}Auf dem NAS unter <b>Systemsteuerung → Netzwerk- &amp; Dateidienste → Telnet/SSH</b> SSH aktivieren. Einen eigenen Administrator-Benutzer verwenden und SSH-Zugriff nur aus dem Verwaltungsnetz zulassen.
+      {% else %}Ein normaler Benutzer ohne root-Rechte reicht – es werden nur Paketlisten gelesen. Am besten mit SSH-Schlüssel.{% endif %}
+      Der Host-Schlüssel wird beim ersten Kontakt gespeichert und danach geprüft.</div>
+    <div class="form-grid">
+      <div class="field"><label>Host / IP</label><input type="text" name="host" value="{{ cfg.host or '' }}" required></div>
+      <div class="field"><label>Port</label><input type="number" name="port" value="{{ cfg.port or 22 }}"></div>
+      <div class="field"><label>Benutzer</label><input type="text" name="username" value="{{ cfg.username or '' }}" autocomplete="off" required></div>
+      <div class="field"><label>Anzeigename (optional)</label><input type="text" name="display_name" value="{{ cfg.display_name or '' }}" placeholder="sonst Hostname"></div>
+      {% if kind == "qnap" %}<div class="field"><label>Betriebssystem</label><select name="os">
+        <option value="qts" {{ 'selected' if cfg.os != 'quts_hero' }}>QTS</option><option value="quts_hero" {{ 'selected' if cfg.os == 'quts_hero' }}>QuTS hero</option></select></div>{% endif %}
+      {{ secret("password", "Passwort", "oder Schlüssel verwenden") }}
+    </div>
+    {{ secret("private_key", "Privater SSH-Schlüssel (optional)", "OpenSSH-Format, Ed25519 empfohlen", true) }}
+    {{ secret("passphrase", "Passphrase des Schlüssels (optional)") }}
+    {% if kind in ("synology", "qnap") %}
+    <details><summary>Zusätzliche CPE-Zuordnung für Pakete</summary>
+      <div class="field" style="margin-top:10px"><textarea name="cpe_map" placeholder="Paketname=cpe:2.3:a:hersteller:produkt">{{ cfg.cpe_map or '' }}</textarea>
+      <div class="hint">Eine Zeile je Paket. Damit werden weitere Pakete gegen die NVD geprüft.</div></div></details>
+    {% endif %}
+    {% if src and cfg.host_key %}<p class="small muted" style="margin-top:14px">Gespeicherter Host-Schlüssel: <span class="mono">{{ cfg.host_key.split(' ')[0] }} …{{ cfg.host_key[-16:] }}</span></p>{% endif %}
+  {% endif %}
+
+  <div class="btns" style="margin-top:22px"><button class="btn btn-primary">Speichern</button><a class="btn btn-outline" href="/quellen">Abbrechen</a></div>
+</form>
+
+{% if src %}
+<div class="btns section">
+  {% if kind != "action1" and cfg.host_key %}
+  <form method="post" action="/quellen/{{ src.id }}/hostkey" data-confirm="Gespeicherten Host-Schlüssel wirklich zurücksetzen? Nur nach einer Neuinstallation des Geräts.">{{ csrf_field() }}
+    <button class="btn btn-outline btn-sm">{{ icon("key-round") }} Host-Schlüssel zurücksetzen</button></form>
+  {% endif %}
+  <form method="post" action="/quellen/{{ src.id }}/loeschen" data-confirm="Quelle „{{ src.name }}“ mit allen Geräten und Funden löschen?">{{ csrf_field() }}
+    <button class="btn btn-danger btn-sm">{{ icon("trash-2") }} Quelle löschen</button></form>
+</div>
+{% endif %}
+{% endblock %}

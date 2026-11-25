@@ -1,0 +1,25 @@
+{% macro icon(name, cls="") -%}
+<svg class="ic {{ cls }}" aria-hidden="true"><use href="/static/img/icons.svg#i-{{ name }}"></use></svg>
+{%- endmacro %}
+
+{% macro prio(cve) -%}
+{% set p = priority(cve) %}<span class="badge {{ PRIORITIES[p].css }}" title="{{ PRIORITIES[p].hint }}">{{ PRIORITIES[p].label }}</span>
+{%- endmacro %}
+
+{% macro kev(cve) -%}
+{% if cve and cve.kev %}<span class="badge b-kev" title="In der CISA-Liste aktiv ausgenutzter Schwachstellen">{{ icon("flame") }} Aktiv ausgenutzt</span>{% endif %}
+{%- endmacro %}
+
+{% macro cvss(cve) -%}
+{% if cve and cve.cvss is not none %}<b>{{ "%.1f"|format(cve.cvss) }}</b> <span class="sub">{{ severity_de(cve.severity) }}</span>{% else %}<span class="muted">–</span>{% endif %}
+{%- endmacro %}
+
+{% macro epss(cve) -%}
+{% if cve and cve.epss is not none %}<span title="Wahrscheinlichkeit eines Angriffs in den nächsten 30 Tagen (FIRST EPSS)">{{ "%.1f"|format(cve.epss * 100) }} %</span>{% else %}<span class="muted">–</span>{% endif %}
+{%- endmacro %}
+
+{% macro kind_icon(kind) -%}
+{{ icon({"synology": "hard-drive", "qnap": "hard-drive", "linux": "server", "proxmox": "server"}.get(kind, "monitor")) }}
+{%- endmacro %}
+
+{% macro csrf_field() -%}<input type="hidden" name="csrf" value="{{ csrf }}">{%- endmacro %}

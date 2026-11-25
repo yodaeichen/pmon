@@ -1,0 +1,13 @@
+services:
+  patchmonitor:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      BASE_URL: https://pmon.mbit.solutions
+      DISPLAY_TZ: Europe/Berlin
+    volumes:
+      - pmon-data:/data
+volumes:
+  pmon-data:

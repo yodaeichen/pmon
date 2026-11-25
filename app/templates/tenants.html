@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon, csrf_field with context %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{{ icon("building-2") }} Kunden</span>
+    <h1>Kunden</h1>
+    <p>Jeder Kunde bündelt seine Geräte. Action1-Organisationen werden beim ersten Scan automatisch angelegt und über die Organisations-ID zugeordnet.</p>
+  </div>
+</div>
+<div class="table-wrap"><table>
+  <thead><tr><th>Name</th><th>Geräte</th><th class="hide-sm">Action1-Organisation</th><th>Bearbeiten</th></tr></thead>
+  <tbody>
+  {% for t in tenants %}
+    <tr>
+      <td><b>{{ t.name }}</b>{% if t.note %}<div class="sub">{{ t.note }}</div>{% endif %}</td>
+      <td>{{ dev_count.get(t.id, 0) }}</td>
+      <td class="hide-sm mono small">{{ t.action1_org_id or "–" }}</td>
+      <td>
+        <details><summary>Bearbeiten</summary>
+          <form method="post" action="/kunden" style="margin-top:10px">{{ csrf_field() }}<input type="hidden" name="tid" value="{{ t.id }}">
+            <div class="field"><label>Name</label><input type="text" name="name" value="{{ t.name }}" required></div>
+            <div class="field"><label>Notiz</label><input type="text" name="note" value="{{ t.note }}"></div>
+            <div class="field"><label>Action1-Organisations-ID</label><input type="text" name="action1_org_id" value="{{ t.action1_org_id or '' }}"></div>
+            <button class="btn btn-primary btn-sm">Speichern</button>
+          </form>
+          {% if user.is_admin %}
+          <form method="post" action="/kunden/{{ t.id }}/loeschen" data-confirm="Kunde „{{ t.name }}“ mit allen Geräten und Funden löschen?" style="margin-top:8px">{{ csrf_field() }}
+            <button class="btn btn-danger btn-sm">{{ icon("trash-2") }} Löschen</button></form>
+          {% endif %}
+        </details>
+      </td>
+    </tr>
+  {% else %}<tr><td colspan="4" class="empty">Noch keine Kunden.</td></tr>{% endfor %}
+  </tbody>
+</table></div>
+
+<div class="card section">
+  <h3>{{ icon("plus") }} Neuer Kunde</h3>
+  <form method="post" action="/kunden">{{ csrf_field() }}
+    <div class="form-grid">
+      <div class="field"><label>Name</label><input type="text" name="name" required></div>
+      <div class="field"><label>Notiz</label><input type="text" name="note"></div>
+      <div class="field"><label>Action1-Organisations-ID (optional)</label><input type="text" name="action1_org_id"></div>
+    </div>
+    <button class="btn btn-primary">Anlegen</button>
+  </form>
+</div>
+{% endblock %}

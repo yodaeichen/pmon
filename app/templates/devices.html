@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon, kind_icon with context %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{{ icon("monitor") }} Geräte</span>
+    <h1>Geräte</h1>
+    <p>{{ devices|length }} Gerät(e) aus allen Quellen.</p>
+  </div>
+</div>
+<form class="filters" method="get">
+  <div class="field"><label>Kunde</label><select name="kunde"><option value="">Alle</option>
+    {% for t in tenants %}<option value="{{ t.id }}" {{ 'selected' if f.kunde == t.id }}>{{ t.name }}</option>{% endfor %}</select></div>
+  <div class="field"><label>Typ</label><select name="typ"><option value="">Alle</option>
+    {% for k, v in kinds.items() %}<option value="{{ k }}" {{ 'selected' if f.typ == k }}>{{ v }}</option>{% endfor %}</select></div>
+  <div class="field"><label>Suche</label><input type="search" name="q" value="{{ f.q }}" placeholder="Name oder Adresse"></div>
+  <button class="btn btn-outline">{{ icon("search") }} Filtern</button>
+</form>
+<div class="table-wrap"><table>
+  <thead><tr><th>Gerät</th><th>Kunde</th><th>System</th><th>Offen</th><th class="hide-sm">Zuletzt gesehen</th></tr></thead>
+  <tbody>
+  {% for d in devices %}{% set c = counts.get(d.id) %}
+    <tr>
+      <td><a href="/geraete/{{ d.id }}">{{ kind_icon(d.kind) }} <b>{{ d.name }}</b></a>
+        {% if d.online is not none %}<div class="sub"><span class="dot {{ 'on' if d.online else 'off' }}"></span>{{ "online" if d.online else "offline" }}</div>{% endif %}</td>
+      <td>{{ d.tenant.name if d.tenant }}</td>
+      <td>{{ kinds.get(d.kind, "") }}<div class="sub">{{ d.os }} {{ d.os_version if d.os_version not in (d.os or "") }}</div></td>
+      <td class="nowrap">{% if c %}
+        {% if c.sofort %}<span class="badge p-sofort">{{ c.sofort }} sofort</span>{% endif %}
+        {% if c.hoch %}<span class="badge p-hoch">{{ c.hoch }} hoch</span>{% endif %}
+        {% if c.mittel + c.niedrig %}<span class="badge">{{ c.mittel + c.niedrig }} weitere</span>{% endif %}
+      {% else %}<span class="badge b-ok">{{ icon("circle-check") }} keine</span>{% endif %}</td>
+      <td class="hide-sm small {{ 'p-hoch badge' if d.last_seen and d.last_seen < stale_before }}">{{ fmt_dt(d.last_seen) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="empty">Noch keine Geräte. {% if user.can_manage %}<a href="/quellen/neu">Quelle anlegen</a>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

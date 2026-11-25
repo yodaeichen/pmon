@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon with context %}
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">{{ icon("plug") }} Neue Quelle</span><h1>Welche Art von Quelle?</h1></div></div>
+<div class="grid three">
+  {% for k, v in kinds.items() %}
+  <a class="kpi-card" href="/quellen/neu?typ={{ k }}">
+    <span class="tile lg blue">{{ icon({"action1": "cloud", "synology": "hard-drive", "qnap": "hard-drive", "linux": "server"}[k]) }}</span>
+    <span><b>{{ v.label }}</b><div class="lbl">{{ v.hint }}</div></span>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon, csrf_field with context %}
+{% macro userform(u=None) %}
+<form method="post" action="/benutzer" style="margin-top:10px">{{ csrf_field() }}{% if u %}<input type="hidden" name="uid" value="{{ u.id }}">{% endif %}
+  <div class="form-grid">
+    {% if not u %}<div class="field"><label>Benutzername</label><input type="text" name="username" required autocomplete="off"></div>{% endif %}
+    <div class="field"><label>Anzeigename</label><input type="text" name="display_name" value="{{ u.display_name if u else '' }}"></div>
+    <div class="field"><label>Rolle</label><select name="role">{% for k, v in roles.items() %}<option value="{{ k }}" {{ 'selected' if (u and u.role == k) or (not u and k == 'leser') }}>{{ v }}</option>{% endfor %}</select></div>
+    <div class="field"><label>{{ "Neues Passwort" if u else "Passwort" }}</label><input type="password" name="password" autocomplete="new-password" {{ '' if u else 'required' }} placeholder="{{ 'leer = unverändert' if u }}"><div class="hint">mindestens 10 Zeichen</div></div>
+  </div>
+  <div class="field"><label>Sichtbare Kunden</label>
+    <div class="btns">{% for t in tenants %}<label class="check small"><input type="checkbox" name="tenants" value="{{ t.id }}" {{ 'checked' if u and t in u.tenants }}> {{ t.name }}</label>{% endfor %}</div>
+    <div class="hint">Keine Auswahl: Administratoren und Techniker sehen alle Kunden, Leser keinen.</div></div>
+  <label class="check"><input type="checkbox" name="is_active" {{ 'checked' if not u or u.is_active }}> aktiv</label>
+  <div class="btns" style="margin-top:12px"><button class="btn btn-primary btn-sm">{{ "Speichern" if u else "Anlegen" }}</button></div>
+</form>
+{% endmacro %}
+{% block content %}
+<div class="page-head"><div><span class="eyebrow">{{ icon("users") }} Benutzer</span><h1>Benutzer</h1>
+  <p>Leser-Zugänge eignen sich z. B. für Kunden, die nur ihre eigenen Systeme sehen sollen.</p></div></div>
+<div class="table-wrap"><table>
+  <thead><tr><th>Benutzer</th><th>Rolle</th><th class="hide-sm">Kunden</th><th class="hide-sm">Letzte Anmeldung</th><th>Bearbeiten</th></tr></thead>
+  <tbody>{% for u in users %}
+    <tr><td><b>{{ u.username }}</b>{% if not u.is_active %} <span class="badge">inaktiv</span>{% endif %}<div class="sub">{{ u.display_name }}</div></td>
+      <td>{{ u.role|capitalize }}</td>
+      <td class="hide-sm small">{{ u.tenants|map(attribute="name")|join(", ") or ("alle" if u.role != "leser" else "keine") }}</td>
+      <td class="hide-sm small">{{ fmt_dt(u.last_login) }}</td>
+      <td><details><summary>Bearbeiten</summary>{{ userform(u) }}
+        {% if u.id != user.id %}<form method="post" action="/benutzer/{{ u.id }}/loeschen" data-confirm="Benutzer {{ u.username }} löschen?" style="margin-top:8px">{{ csrf_field() }}<button class="btn btn-danger btn-sm">{{ icon("trash-2") }} Löschen</button></form>{% endif %}
+      </details></td></tr>
+  {% endfor %}</tbody>
+</table></div>
+<div class="card section"><h3>{{ icon("plus") }} Neuer Benutzer</h3>{{ userform() }}</div>
+{% endblock %}

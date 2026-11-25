@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "_m.html" import icon, prio, kev, cvss, epss, csrf_field with context %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <span class="eyebrow">{{ icon("activity") }} Übersicht</span>
+    <h1>Sicherheitslage auf einen Blick</h1>
+    <p>Offene Schwachstellen aller Systeme – priorisiert nach aktiver Ausnutzung (CISA KEV), Angriffswahrscheinlichkeit (EPSS) und Schweregrad (CVSS).</p>
+  </div>
+  <div class="btns">
+    <a class="btn btn-outline" href="/export/schwachstellen.csv">{{ icon("download") }} CSV-Export</a>
+    {% if user.can_manage %}<a class="btn btn-primary" href="/quellen">{{ icon("plug") }} Quellen</a>{% endif %}
+  </div>
+</div>
+
+<div class="grid kpi">
+  <a class="kpi-card" href="/schwachstellen?prio=sofort"><span class="tile red">{{ icon("shield-alert") }}</span>
+    <span><div class="num">{{ kpi.sofort }}</div><div class="lbl">Funde mit Priorität „Sofort“</div></span></a>
+  <a class="kpi-card" href="/schwachstellen?kev=1"><span class="tile red">{{ icon("flame") }}</span>
+    <span><div class="num">{{ kpi.kev }}</div><div class="lbl">aktiv ausgenutzte CVEs</div></span></a>
+  <a class="kpi-card" href="/schwachstellen"><span class="tile blue">{{ icon("bug") }}</span>
+    <span><div class="num">{{ kpi.cves }}</div><div class="lbl">offene CVEs · {{ kpi.open }} Funde</div></span></a>
+  <a class="kpi-card" href="/geraete"><span class="tile blue">{{ icon("monitor") }}</span>
+    <span><div class="num">{{ kpi.affected }}<span class="muted" style="font-size:1rem"> / {{ kpi.devices }}</span></div><div class="lbl">Geräte betroffen</div></span></a>
+  <a class="kpi-card" href="/geraete"><span class="tile {{ 'orange' if kpi.stale else 'green' }}">{{ icon("clock") }}</span>
+    <span><div class="num">{{ kpi.stale }}</div><div class="lbl">seit &gt; {{ stale_days }} Tagen nicht gesehen</div></span></a>
+</div>
+
+{% set total = (by_prio.sofort + by_prio.hoch + by_prio.mittel + by_prio.niedrig) or 1 %}
+<div class="card section">
+  <div class="section-title"><h3>Verteilung nach Priorität</h3><span class="muted small">{{ kpi.open }} offene Funde</span></div>
+  <div class="bar">
+    <span class="s" style="width:{{ 100 * by_prio.sofort / total }}%"></span><span class="h" style="width:{{ 100 * by_prio.hoch / total }}%"></span><span class="m" style="width:{{ 100 * by_prio.mittel / total }}%"></span><span class="n" style="width:{{ 100 * by_prio.niedrig / total }}%"></span>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--p-sofort)"></i>Sofort {{ by_prio.sofort }}</span>
+    <span><i style="background:#E07A2E"></i>Hoch {{ by_prio.hoch }}</span>
+    <span><i style="background:#D9B23C"></i>Mittel {{ by_prio.mittel }}</span>
+    <span><i style="background:var(--grey-light)"></i>Niedrig {{ by_prio.niedrig }}</span>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title"><h2>Kunden</h2>{% if user.can_manage %}<a href="/kunden" class="small">Kunden verwalten</a>{% endif %}</div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Kunde</th><th>Geräte</th><th>Betroffen</th><th>Sofort</th><th>Hoch</th><th>Mittel</th><th class="hide-sm">Niedrig</th><th></th></tr></thead>
+    <tbody>
+    {% for row in tenants %}
+      <tr>
+        <td><span class="light {{ row.light }}"></span><b>{{ row.t.name }}</b></td>
+        <td>{{ row.devices }}</td><td>{{ row.affected }}</td>
+        <td>{% if row.c.sofort %}<span class="badge p-sofort">{{ row.c.sofort }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+        <td>{% if row.c.hoch %}<span class="badge p-hoch">{{ row.c.hoch }}</span>{% else %}<span class="muted">0</span>{% endif %}</td>
+        <td>{{ row.c.mittel }}</td><td class="hide-sm">{{ row.c.niedrig }}</td>
+        <td class="right"><a href="/schwachstellen?kunde={{ row.t.id }}" class="small nowrap">Details {{ icon("chevron-right") }}</a></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">Noch keine Kunden. {% if user.can_manage %}Lege eine <a href="/quellen/neu">Quelle</a> an – Action1-Organisationen werden automatisch als Kunden übernommen.{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="section">
+  <div class="section-title"><h2>Wichtigste Schwachstellen</h2><a href="/schwachstellen" class="small">Alle anzeigen</a></div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Priorität</th><th>CVE</th><th>Produkt</th><th>Geräte</th><th>CVSS</th><th class="hide-sm">EPSS</th></tr></thead>
+    <tbody>
+    {% for g in top %}
+      <tr>
+        <td>{{ prio(g.cve) }}</td>
+        <td><a href="/schwachstellen/{{ g.cve.id }}"><b>{{ g.cve.id }}</b></a> {{ kev(g.cve) }}
+          {% if g.cve.description %}<div class="sub">{{ g.cve.description[:140] }}{{ "…" if g.cve.description|length > 140 }}</div>{% endif %}</td>
+        <td>{{ (g.products|sort|join(", "))[:80] or "–" }}<div class="sub">{{ g.tenants|lookup(tenant_names)|join(", ") }}</div></td>
+        <td>{{ g.devices|length }}</td><td class="nowrap">{{ cvss(g.cve) }}</td><td class="hide-sm">{{ epss(g.cve) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">{{ icon("shield-check") }} Keine offenen Schwachstellen gefunden.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+{% if user.can_manage %}
+<div class="section grid two">
+  <div class="card">
+    <div class="section-title"><h3>Quellen</h3><a href="/quellen" class="small">Verwalten</a></div>
+    {% for s in sources %}
+      <div class="btns" style="justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--grey-lighter)">
+        <span><span class="dot {{ 'on' if s.last_status == 'ok' else 'off' if s.last_status == 'fehler' }}"></span><a href="/quellen/{{ s.id }}">{{ s.name }}</a></span>
+        <span class="small muted">{{ ago(s.last_run) }}</span>
+      </div>
+    {% else %}<p class="muted">Noch keine Quelle eingerichtet. <a href="/quellen/neu">Jetzt anlegen</a></p>{% endfor %}
+  </div>
+  <div class="card">
+    <div class="section-title"><h3>Letzte Scans</h3><a href="/protokoll" class="small">Protokoll</a></div>
+    {% for r in runs %}
+      <div style="padding:6px 0;border-bottom:1px solid var(--grey-lighter)">
+        <span class="badge {{ 'b-ok' if r.status == 'ok' else 'p-sofort' if r.status == 'fehler' else 'b-blue' }}">{{ r.status }}</span>
+        <b class="small">{{ r.source.name if r.source }}</b> <span class="small muted">{{ fmt_dt(r.started) }}</span>
+        <div class="sub small muted">{{ r.message[:160] }}</div>
+      </div>
+    {% else %}<p class="muted">Noch keine Scans.</p>{% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
