@@ -448,7 +448,7 @@ def source_edit(request: Request, sid: int, user: User = Depends(require_manager
 
 
 SECRET_FIELDS = {"client_id", "client_secret", "password", "private_key", "passphrase"}
-CONFIG_FIELDS = {"region", "base_url", "org_ids", "host", "port", "username", "display_name", "os", "cpe_map"}
+CONFIG_FIELDS = {"region", "base_url", "org_ids", "request_pause_ms", "host", "port", "username", "display_name", "os", "cpe_map"}
 BOOL_FIELDS = {"inventory", "only_open"}
 
 

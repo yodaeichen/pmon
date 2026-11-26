@@ -112,7 +112,8 @@ def _run(source_id: int) -> None:
             sec = settings_store.get_secrets(db)
             enrich(db, nvd_key=sec.get("nvd_api_key"), should_stop=stop)
             sent = maybe_notify(db)
-            msg = "; ".join(result.messages[:8])
+            msgs = sorted(result.messages, key=lambda m: not m.startswith("Hinweis"))  # Hinweise zuerst
+            msg = "; ".join(msgs[:8])
             msg += f" – {stats['new']} neu, {stats['resolved']} behoben"
             if sent:
                 msg += f" ({sent})"

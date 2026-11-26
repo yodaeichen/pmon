@@ -69,6 +69,9 @@ def handler(request: httpx.Request) -> httpx.Response:
         if path.endswith("/CVE-2015-0319/endpoints"):
             STATE["calls_500"] = STATE.get("calls_500", 0) + 1
             return httpx.Response(500, json={"error": "internal"})
+        if path.endswith("/CVE-2024-1111/endpoints") and STATE.get("limit_left", 0) > 0:
+            STATE["limit_left"] -= 1
+            return httpx.Response(429, json={"retry_after": 1})
         if path.endswith("/CVE-2024-1111/endpoints"):
             return httpx.Response(200, json={"items": [{"endpoint_id": "ep1", "endpoint_name": "PC-BUERO-01",
                 "software": [{"product_name": "7-Zip", "versions": [{"version": "23.01"}],
@@ -267,6 +270,22 @@ def main():
         resolved = [f.cve_id for f in db.query(Finding).filter_by(status="resolved").all()]
         assert resolved == ["CVE-2024-2222"], resolved
         db.close()
+
+        # Rate-Limit: zweimal 429, dann klappt es
+        STATE["limit_left"] = 2
+        scanner.run_source(ids[0])
+        db = SessionLocal()
+        a1 = db.get(Source, ids[0])
+        assert a1.last_status == "ok" and "2× gedrosselt" in a1.last_message, a1.last_message
+        db.close()
+        # Dauerhaft 429 → verständliche Fehlermeldung
+        STATE["limit_left"] = 100
+        scanner.run_source(ids[0])
+        db = SessionLocal()
+        a1 = db.get(Source, ids[0])
+        assert a1.last_status == "fehler" and "dauerhaft" in a1.last_message, a1.last_message
+        db.close()
+        STATE["limit_left"] = 0
 
         # Abbrechen während der Abfrage
         db = SessionLocal()

@@ -9,6 +9,7 @@ Pfade wie im offiziellen PowerShell-Modul PSAction1:
   GET  /apps/{org}/data/{endpoint}
 Antworten sind seitenweise ({items, total_items, next_page}, Parameter from/limit).
 """
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -23,6 +24,8 @@ REGIONS = {
     "au": ("Australien", "https://app.au.action1.com/api/3.0"),
 }
 PAGE = 200
+MAX_429_RETRIES = 8      # wie PSAction1: warten und erneut versuchen
+MAX_429_WAIT = 300       # höchstens 5 Minuten am Stück warten
 _transport: httpx.BaseTransport | None = None  # für Tests austauschbar
 
 
@@ -54,8 +57,12 @@ def _parse_dt(value) -> datetime | None:
 
 class Action1Client:
     def __init__(self, base_url: str, client_id: str, client_secret: str,
-                 timeout: float = 30, transport: httpx.BaseTransport | None = None, should_stop=no_stop):
+                 timeout: float = 30, transport: httpx.BaseTransport | None = None, should_stop=no_stop,
+                 min_interval: float = 0.25):
         self.should_stop = should_stop
+        self.min_interval = max(0.0, min_interval)  # Pause zwischen zwei Anfragen
+        self._last = 0.0
+        self.throttled = 0  # Anzahl 429-Antworten in diesem Lauf
         self.base = base_url.rstrip("/")
         self.client_id = client_id
         self.client_secret = client_secret
@@ -82,8 +89,10 @@ class Action1Client:
             self.login()
         url = path if path.startswith("http") else f"{self.base}{path}"
         relogged = False
-        for attempt in range(3):
-            self.should_stop()
+        errors = 0
+        limited = 0
+        while True:
+            self._pace()
             r = self.http.get(url, params=params, headers={"Authorization": f"Bearer {self.token}"})
             if r.status_code == 401 and not relogged:
                 relogged = True
@@ -91,13 +100,31 @@ class Action1Client:
                 continue
             if r.status_code == 404:
                 return None
-            if r.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-                wait(2 if attempt == 0 else 5, self.should_stop)  # kurzzeitige Störung abwarten
+            if r.status_code == 429:
+                # Rate-Limit: Wartezeit aus der Antwort (retry_after / Retry-After), sonst 2, 4, 8 … s
+                self.throttled += 1
+                if limited >= MAX_429_RETRIES:
+                    raise CollectorError(
+                        "Action1 begrenzt die Anfragen (429) dauerhaft. Intervall der Quelle erhöhen, "
+                        "„Pause zwischen Anfragen“ vergrößern oder das Software-Inventar abschalten.")
+                wait(min(MAX_429_WAIT, _retry_after(r) or 2 * 2 ** limited), self.should_stop)
+                limited += 1
+                # nach einer Drosselung dauerhaft etwas langsamer weitermachen
+                self.min_interval = min(5.0, max(self.min_interval * 2, 0.5))
+                continue
+            if r.status_code in (500, 502, 503, 504) and errors < 2:
+                wait(2 if errors == 0 else 5, self.should_stop)  # kurzzeitige Störung abwarten
+                errors += 1
                 continue
             r.raise_for_status()
             return r.json()
-        r.raise_for_status()
-        return None
+
+    def _pace(self) -> None:
+        self.should_stop()
+        pause = self.min_interval - (time.monotonic() - self._last)
+        if pause > 0:
+            wait(pause, self.should_stop)
+        self._last = time.monotonic()
 
     def paged(self, path: str, params: dict | None = None, max_items: int = 50_000, page_size: int = PAGE):
         params = dict(params or {})
@@ -132,7 +159,12 @@ def collect(config: dict, secrets: dict, timeout: float = 30,
     base = config.get("base_url") or REGIONS.get(region, REGIONS["eu"])[1]
     if not secrets.get("client_id") or not secrets.get("client_secret"):
         raise CollectorError("Client-ID und Client-Secret fehlen.")
-    cli = Action1Client(base, secrets["client_id"], secrets["client_secret"], timeout, transport, should_stop)
+    try:
+        pause = float(config.get("request_pause_ms") or 250) / 1000
+    except (TypeError, ValueError):
+        pause = 0.25
+    cli = Action1Client(base, secrets["client_id"], secrets["client_secret"], timeout, transport, should_stop,
+                        min_interval=pause)
     res = CollectResult()
     try:
         orgs = list(cli.paged("/organizations"))
@@ -237,6 +269,9 @@ def collect(config: dict, secrets: dict, timeout: float = 30,
                 liste = ", ".join(skipped[:5]) + (f" und {len(skipped) - 5} weitere" if len(skipped) > 5 else "")
                 res.messages.append(f"Hinweis: Action1 lieferte für {len(skipped)} CVE(s) einen Serverfehler, "
                                     f"übersprungen: {liste}")
+        if cli.throttled:
+            res.messages.append(f"Hinweis: Action1 hat {cli.throttled}× gedrosselt (429) – pmon hat jeweils "
+                                "gewartet und langsamer weitergemacht")
     except httpx.HTTPStatusError as exc:
         raise CollectorError(f"Action1-API antwortet mit {exc.response.status_code}: {exc.request.url.path}") from exc
     except httpx.HTTPError as exc:
@@ -244,6 +279,23 @@ def collect(config: dict, secrets: dict, timeout: float = 30,
     finally:
         cli.close()
     return res
+
+
+def _retry_after(r: httpx.Response) -> float | None:
+    """Wartezeit in Sekunden aus einer 429-Antwort (JSON „retry_after“ oder Header „Retry-After“)."""
+    try:
+        body = r.json()
+        v = body.get("retry_after") if isinstance(body, dict) else None
+        if v is None and isinstance(body, dict) and isinstance(body.get("error"), dict):
+            v = body["error"].get("retry_after")
+        if v is not None and float(v) > 0:
+            return float(v)
+    except (ValueError, TypeError):
+        pass
+    h = r.headers.get("Retry-After")
+    if h and h.strip().isdigit() and int(h) > 0:
+        return float(h)
+    return None
 
 
 def _affected(cli: Action1Client, org_id: str, cve: str) -> list | None:
